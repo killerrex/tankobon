@@ -59,7 +59,28 @@ class Transform:
         self._new = new
         self._nested = nested or []
 
-    def pretty(self, tabs='', as_log=True):
+    def _two_cols(self, tabs=''):
+        """
+        Get a two columns transform schema
+
+        Return:
+            [old], [new]
+        """
+        old = ['{}{}'.format(tabs, self._old)]
+        if self._new is None:
+            new = [old[0]]
+        else:
+            new = ['{}{}'.format(tabs, self._new)]
+
+        # Now the nested ones...
+        tabs += self._Tab
+        for sub in self._nested:
+            s_old, s_new = sub._two_cols(tabs)
+            old.extend(s_old)
+            new.extend(s_new)
+        return old, new
+
+    def pretty(self, tabs='', as_log=False):
         """
         Write the transform schema in a nice format.
 
@@ -69,22 +90,17 @@ class Transform:
             tabs: String to add to each line as tabs for alignment
             as_log: Use the log as output
         """
-        # First this level
-        if self._new is None:
-            # Special root of transformations...
-            txt = '{}'.format(self._old)
-        else:
-            txt = '{}{} ==> {}'.format(tabs, self._old, self._new)
+        # Obtain the info as a 2 columns
+        old, new = self._two_cols(tabs)
 
-        if as_log:
-            _logger.info(txt)
-        else:
-            print(txt)
+        c = max(len(s) for s in old)
+        for o, n in zip(old, new):
+            txt = o.ljust(c) + ' ==> ' + n
 
-        # Now any descendant
-        tabs += self._Tab
-        for sub in self._nested:
-            sub.pretty(tabs, as_log=as_log)
+            if as_log:
+                _logger.info(txt)
+            else:
+                print(txt)
 
     def run(self, dry, path=None):
         """
