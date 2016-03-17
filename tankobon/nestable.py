@@ -78,6 +78,9 @@ class Base(object):
     Attributes:
         _name: Original name of the Element
         _number: Associated number in the collection.
+        _virtual: True if this element shall not produce a transform
+        _hoaxes: List of numbers present in this level name not related
+                 with the real number
     """
 
     def __init__(self, name):
@@ -91,6 +94,7 @@ class Base(object):
         self._name = name
         self._number = None
         self._virtual = False
+        self._hoaxes = []
 
     def path(self):
         """
@@ -127,12 +131,13 @@ class Base(object):
         of the parent's numbers is consider spurious.
 
         Returns:
-            A list with this element number (or empty)
+            hoaxes, level-related
         """
         if self._number:
-            return [int(self._number)]
+            level = [int(self._number)]
         else:
-            return []
+            level = []
+        return self._hoaxes[:], level
 
     def wide(self, level=0):
         """
@@ -237,13 +242,14 @@ class Node(Base):
         discarded
 
         Returns:
-            A list with spurious numbers
+            hoaxes, level related
         """
-        if self._parent is None:
-            top = []
-        else:
-            top = self._parent.spurious()
-        return top + super().spurious()
+        hoax, top = super().spurious()
+        if self._parent is not None:
+            dh, dt = self._parent.spurious()
+            hoax.extend(dh)
+            top.extend(dt)
+        return hoax, top
 
     def _rm_spurious(self, numbers, greedy=False):
         """
@@ -262,11 +268,16 @@ class Node(Base):
         if self._parent is None:
             return numbers
 
-        spurious = self._parent.spurious()
-        _logger.debug("\tNumbers: %s {%s}", str(numbers), str(spurious))
-
+        hoax, spurious = self._parent.spurious()
+        _logger.debug(
+            "\tNumbers: %s {%s:%s}",
+            str(numbers),
+            str(hoax),
+            str(spurious)
+        )
         # Remove any spurious value (just once each one)
-        for n in spurious:
+        # Start always with the hoaxes
+        for n in hoax + spurious:
             if not greedy and len(numbers) == 1:
                 break
             if n in numbers:
@@ -286,11 +297,15 @@ class Node(Base):
             numbers: Numbers found in the element's name.
 
         Returns:
-            The best candidate
+            The best candidate, the hoaxes found
 
         Raises:
             CannotChooseError: Too many options left, cannot decide.
         """
+        if len(numbers) == 0:
+            # Oh, is a special element...
+            return None, []
+
         # Filter based on the expected ones
         guess = [x for x in numbers if x in expected]
         _logger.debug("\tGuesses from expected: %s", str(guess))
@@ -302,15 +317,16 @@ class Node(Base):
 
             if len(numbers) == 0:
                 # Oh, is a special element...
-                return None
+                return None, []
 
             # Ok, just pick the first element
             _logger.debug("\tJust pick the first one: %s", str(numbers))
-            return numbers[0]
+            return numbers[0], numbers[1:]
 
         if len(guess) == 1:
             _logger.debug("\tJust one guess: %s", str(guess))
-            return guess[0]
+            numbers.remove(guess[0])
+            return guess[0], numbers
 
         # Several candidates and numbers...
         raise CannotChooseError(self._name)
@@ -332,7 +348,8 @@ class Node(Base):
             # Remove any spurious value
             numbers = self._rm_spurious(numbers)
             # Finally decide from the expected values
-            self._number = self._guess(expected, numbers)
+            self._number, hoax = self._guess(expected, numbers)
+            self._hoaxes.extend(hoax)
 
         if self._number is None:
             # This is an bonus number, use the 'bonus' label
@@ -365,7 +382,13 @@ class Node(Base):
         """
         assert(isinstance(other, Node))
 
-        return self._number == other._number and self._extra == other._extra
+        def check(a, b):
+            return (a is None and b is None) or a == b
+
+        return (
+            check(self._number, other._number) and
+            check(self._extram, other._extra)
+        )
 
     def __ne__(self, other):
         return not self.__eq__(other)
@@ -615,6 +638,20 @@ class Volume(Node):
 
         self._nodes.sort()
 
+        # Prevent several special chapters to collapse to the same name
+        seen = {}
+        for c in self._nodes:
+            # This only happens with the special ones
+            if c._number is not None:
+                continue
+            txt = format(self)
+            if txt in seen:
+                n = seen[txt] + 1
+                c._extra += " " + str(n)
+            else:
+                n = 1
+            seen[txt] = n
+
         if opts.flat:
             return None
 
@@ -670,9 +707,7 @@ class Series(Base):
         self._nodes = []
         self._wides = [0, 0, 0]
         # Search for a number in the title...
-        numbers = UNumber.extract_numbers(self._name, False)
-        if numbers:
-            self._number = numbers[0]
+        self._hoaxes = UNumber.extract_numbers(self._name, False)
         self._populate(opts)
 
     def _populate(self, opts: Options):
