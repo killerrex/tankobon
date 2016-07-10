@@ -39,7 +39,7 @@ class TestWorkModesCase(unittest.TestCase):
 
         # Create the expected tree
         vol = LevelFmt(2, ['vol ', 'v'])
-        cha = LevelFmt(2, 'ch ')
+        cha = LevelFmt(2, 'c')
 
         nominal = Reference.generate('nominal')
         expected = nominal(args[0], vol, cha, 'Bonus')
@@ -59,7 +59,7 @@ class TestWorkModesCase(unittest.TestCase):
 
         # Create the expected tree
         vol = LevelFmt(2, ['vol ', 'v'])
-        cha = LevelFmt(2, 'ch ')
+        cha = LevelFmt(2, 'c')
         num1 = Reference.generate('num1')
         expected = num1(args[0], vol, cha, 'Bonus')
         print("Expected transform:")
@@ -81,7 +81,7 @@ class TestWorkModesCase(unittest.TestCase):
 
         # Create the expected tree
         vol = LevelFmt(2, ['vol ', 'v'])
-        cha = LevelFmt(2, 'ch ')
+        cha = LevelFmt(2, 'c')
         num1 = Reference.generate('miss')
         expected = num1(args[0], vol, cha, 'Bonus')
         print("Expected transform:")
@@ -123,7 +123,7 @@ class TestWorkModesCase(unittest.TestCase):
 
         # Create the expected tree
         vol = LevelFmt(2, ['vol ', 'v'])
-        cha = LevelFmt(2, 'ch ')
+        cha = LevelFmt(2, 'c')
         num1 = Reference.generate('reset')
         expected = num1(args[0], vol, cha, 'Bonus')
         print("Expected transform:")
@@ -144,7 +144,7 @@ class TestWorkModesCase(unittest.TestCase):
 
         # Create the expected tree
         vol = LevelFmt(2, ['vol ', 'v'])
-        cha = LevelFmt(2, 'ch ')
+        cha = LevelFmt(2, 'c')
         num1 = Reference.generate('single')
         expected = num1(args[0], vol, cha, 'Bonus')
         print("Expected transform:")

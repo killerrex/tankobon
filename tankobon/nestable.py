@@ -56,19 +56,7 @@ class CannotChooseError(Error):
         self.name = name
 
 
-class EmptyFolderError(Error):
-    """
-    Raised when one of the folders is empty.
-
-    Args:
-        folder: Folder name
-    """
-    def __init__(self, folder):
-        super().__init__(folder)
-        self.folder = folder
-
-
-class Base(object):
+class Base:
     """
     Common tools for all the nodes, including root.
 
@@ -365,7 +353,7 @@ class Node(Base):
             expected.remove(n)
         except ValueError:
             # Ok, this shall be an special one
-            _logger.info("Special as %s not in %s", n, str(expected))
+            _logger.info("%s: Special as %s not in %s", self.path(), n, str(expected))
             self._extra = self._option.special
 
     def __eq__(self, other):
@@ -611,12 +599,13 @@ class Volume(Node):
 
         """
 
-        chapters = self._listdir()
-        if not chapters:
-            raise EmptyFolderError(self._name)
-
         if last is None:
             last = opts.first
+
+        chapters = self._listdir()
+        if not chapters:
+            _logger.info("Empty folder: %s", self._name)
+            return last
 
         numbers = [last + k for k in range(len(chapters))]
         # Update the last element expected
@@ -664,7 +653,10 @@ class Volume(Node):
         """
         Last chapter of the volume
         """
-        return max(int(c) for c in self._nodes)
+        if self._nodes:
+            return max(int(c) for c in self._nodes)
+        else:
+            return 0
 
     def __iter__(self):
         """

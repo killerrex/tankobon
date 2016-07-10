@@ -57,7 +57,13 @@ class Transform:
 
         self._old = old
         self._new = new
-        self._nested = nested or []
+
+        self._nested = []
+        if nested is None:
+            return
+        for obj in nested:
+            assert(isinstance(obj, Transform))
+            self._nested.append(obj)
 
     def _two_cols(self, tabs=''):
         """
@@ -71,6 +77,9 @@ class Transform:
             new = [old[0]]
         else:
             new = ['{}{}'.format(tabs, self._new)]
+
+        if self._nested is None:
+            return old, new
 
         # Now the nested ones...
         tabs += self._Tab

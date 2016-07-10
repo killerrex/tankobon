@@ -465,8 +465,8 @@ Label syntax:
         self.volume = OptGroup('Volume', 'vol ')
         self.volume.add_group(False, parser)
 
-        self.chapter = OptGroup('Chapter', 'ch ', upper='v', special=' oMake')
-        self.chapter.add_group(True, parser)
+        self.chapter = OptGroup('Chapter', 'c', upper='v', special=' oMake')
+        self.chapter.add_group(True, parser, tag='ch')
 
         self.add_group(parser)
 
