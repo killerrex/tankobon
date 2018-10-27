@@ -21,7 +21,28 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 """
 
-from tankobon import Main
+import logging
+
+from . import Tankobon
+
+
+class Main(Tankobon):
+    """
+    Tankobon object transformation
+    """
+    _Log_Format = '%(levelname)s:%(message)s'
+
+    def __init__(self, prog='Tankobon', args=None):
+        """
+        Create a new application object
+
+        Args:
+            prog: Program name
+            args: Command line (default: sys.argv)
+        """
+        super().__init__(prog, args)
+        logging.basicConfig(level=self.opt.log, format=self._Log_Format)
+
 
 if __name__ == '__main__':
     Main().exec()

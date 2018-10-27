@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # coding=utf-8
 
 """
@@ -50,8 +49,7 @@ class ActionFlag(argparse.Action):
     _Negate = '--no-'
     """Prefix used for the negate form of the options"""
 
-    def __init__(self, option_strings, dest,
-                 default=None, required=False, help=None):
+    def __init__(self, option_strings, dest, default=None, required=False, help=None):
         """
         Create a Flag Action with enable/disable options.
 
@@ -113,7 +111,7 @@ class ActionFlag(argparse.Action):
         setattr(namespace, self.dest, not is_negative)
 
 
-class OptDict(object):
+class OptDict:
     """
     Group options in a single container.
 
@@ -185,6 +183,7 @@ class OptGroup(OptDict):
 
     Internal Attributes:
         _name: Full name of the level for the help strings
+
     Attributes:
         prefix: Initial string for the options
         label: String to use as series name at this level
@@ -199,7 +198,7 @@ class OptGroup(OptDict):
         bonus: suffix to add to the bonus chapters
     """
 
-    def __init__(self, name, prefix=None, **kwargs):
+    def __init__(self, name: str, prefix: str=None, **kwargs):
         """
         Create a default options group
 
@@ -276,7 +275,7 @@ class OptGroup(OptDict):
         self.special = sub.get('special', vars=self)
         self.bonus = sub.get('bonus', vars=self)
 
-    def add_group(self, is_bottom, parser: argparse.ArgumentParser, tag=None):
+    def add_group(self, is_bottom: bool, parser: argparse.ArgumentParser, tag=None):
         """
         Add The options to an argument parser
 
@@ -382,7 +381,6 @@ class Options(OptDict):
 
     Use the XDG convention to store the default options file.
 
-
     Attributes:
         name: Full name that the series shall have
         root: Series directory
@@ -399,7 +397,7 @@ class Options(OptDict):
     Label = "GENERAL"
 
     @classmethod
-    def get_ini(cls, prog, store=False):
+    def get_ini(cls, prog: str, store=False):
         """
         Select the best ini file for the program
 
@@ -424,7 +422,7 @@ class Options(OptDict):
         else:
             return None
 
-    def __init__(self, prog=None, args=None):
+    def __init__(self, prog: str=None, args=None):
         """
         Parse the options in a nice object...
 
@@ -461,6 +459,7 @@ Label syntax:
         self.action = 'report'
         self.single = False
         self.log = 'info'
+        self.hoax = []
 
         self.volume = OptGroup('Volume', 'vol ')
         self.volume.add_group(False, parser)
@@ -521,6 +520,7 @@ Label syntax:
         self.single = sub.getboolen('single', vars=self)
         self.action = sub.getboolean('action', vars=self)
         self.log = sub.get('log', vars=self)
+        self.hoax = [int(s) for s in sub.get('hoax', vars=self).split()]
 
     def store(self, config):
         """
@@ -533,6 +533,7 @@ Label syntax:
         d['single'] = self.single
         d['action'] = self.action
         d['log'] = self.log
+        d['hoax'] = ' '.join(str(n) for n in self.hoax)
         config[self.Label] = d
         self.volume.store(config)
         self.chapter.store(config)
@@ -542,7 +543,7 @@ Label syntax:
         General options
 
         Args:
-            parser: A ArgParse object
+            parser: An ArgParse object
         """
         g = parser.add_argument("name", help="Name of the series")
         self._map[g.dest] = 'name'
@@ -597,6 +598,12 @@ Label syntax:
             default=self.log, help="Select log level [%(default)s]"
         )
         self._map[g.dest] = 'log'
+
+        g = parser.add_argument(
+            '--hoax', type=int, action='append', default=self.hoax,
+            help='Numbers to ignore from all the levels'
+        )
+        self._map[g.dest] = 'hoax'
 
     def _classify(self, args):
         """

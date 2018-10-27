@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # coding=utf-8
 
 """
@@ -27,6 +26,7 @@ import os
 import shutil
 
 import logging
+
 _logger = logging.getLogger('tankobon')
 
 
@@ -123,6 +123,7 @@ class Transform:
             old = os.path.join(path, self._old)
         else:
             old = self._old
+            path = "."
 
         # First move all the child
         for sub in self._nested:
@@ -178,3 +179,13 @@ class Transform:
             return "{}({}, {})".format(name, self._old, self._new)
         else:
             return "{}({}, {}, ...)".format(name, self._old, self._new)
+
+    def __call__(self, action, *args, **kwargs):
+        if action == 'report':
+            self.pretty(*args, **kwargs)
+        elif action == 'dryrun':
+            self.run(True, *args, **kwargs)
+        elif action == 'enable':
+            self.run(False, *args, **kwargs)
+        else:
+            raise RuntimeError(f'Unknown action {action}')

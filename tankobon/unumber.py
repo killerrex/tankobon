@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # coding=utf-8
 
 """
@@ -30,7 +29,7 @@ from functools import total_ordering
 
 
 @total_ordering
-class UNumber(object):
+class UNumber:
     """
     Represent a number used in numeration of a chapter/volume...
 
@@ -60,7 +59,7 @@ class UNumber(object):
     _A_Match = re.compile(r"\d+(?:\.\d+)?")
 
     @classmethod
-    def from_roman(cls, txt):
+    def from_roman(cls, txt: str):
         """
         Transform a roman number in decimal.
 
@@ -101,7 +100,7 @@ class UNumber(object):
         return value
 
     @classmethod
-    def to_roman(cls, value):
+    def to_roman(cls, value: int):
         """
         Write the number in canonical roman form.
 
@@ -134,7 +133,7 @@ class UNumber(object):
         return txt
 
     @classmethod
-    def extract_numbers(cls, txt, roman=False):
+    def extract_numbers(cls, txt: str, roman=False):
         """
         Parse the name for valid numbers.
 
@@ -256,6 +255,7 @@ class UNumber(object):
     def _tuple(self):
         """
         Create a Tuple with the Integer, decimal
+
         Returns:
             The tuple representation
         """

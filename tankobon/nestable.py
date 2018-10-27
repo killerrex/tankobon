@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # coding=utf-8
 
 """
@@ -34,6 +33,7 @@ from functools import total_ordering
 from tankobon.options import OptGroup, Options
 from tankobon.transform import Transform
 from tankobon.unumber import UNumber
+
 _logger = logging.getLogger('tankobon')
 
 
@@ -71,7 +71,7 @@ class Base:
                  with the real number
     """
 
-    def __init__(self, name):
+    def __init__(self, name: str):
         """
         Create a base object.
 
@@ -263,14 +263,24 @@ class Node(Base):
             str(hoax),
             str(spurious)
         )
+
+        # Process hoaxes first, always in not-greedy mode
+        for n in hoax:
+            # Remove hoaxes only if there is still too many elements
+            if len(numbers) == 1:
+                break
+            if n in numbers:
+                numbers.remove(n)
+                _logger.debug("\tRemove hoax: %d", n)
+
         # Remove any spurious value (just once each one)
-        # Start always with the hoaxes
-        for n in hoax + spurious:
+        for n in spurious:
             if not greedy and len(numbers) == 1:
                 break
             if n in numbers:
                 numbers.remove(n)
                 _logger.debug("\tRemove spurious: %d", n)
+
         return numbers
 
     def _guess(self, expected, numbers):
@@ -375,7 +385,7 @@ class Node(Base):
 
         return (
             check(self._number, other._number) and
-            check(self._extram, other._extra)
+            check(self._extra, other._extra)
         )
 
     def __ne__(self, other):
@@ -700,6 +710,9 @@ class Series(Base):
         self._wides = [0, 0, 0]
         # Search for a number in the title...
         self._hoaxes = UNumber.extract_numbers(self._name, False)
+        # Add any user defined hoax
+        self._hoaxes.extend(opts.hoax)
+        # Finally launch the recursive process
         self._populate(opts)
 
     def _populate(self, opts: Options):
@@ -773,7 +786,12 @@ class Series(Base):
              the full transformation of all the volumes.
         """
         nest = [node.transform() for node in self._nodes]
-        return Transform(self._name, None, nest)
+        if self._virtual:
+            if len(nest) != 1:
+                raise ValueError("Virtual series can be only single")
+            return nest[0]
+        else:
+            return Transform(self._name, None, nest)
 
     def skip(self):
         """

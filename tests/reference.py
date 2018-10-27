@@ -83,7 +83,7 @@ class Reference:
         'single': {
             'volumes': [None],
             'chapters': [[1, 2, 3]],
-            'labels': ['Single Vol', 'Single Vol', 'Single']
+            'labels': [None, 'Single Vol', 'Single']
         }
 
     }
@@ -167,7 +167,10 @@ class Reference:
                 old = '{} {tv[0]}{:02d}'.format(self.labels[1], v, **old_d)
                 new = '{} {tv[0]}{:0{wv}d}'.format(name, v, **new_d)
             res.append(tankobon.Transform(old, new, nested=nested))
-        return tankobon.Transform(self.labels[0], None, res)
+        if self.labels[0] is None:
+            return res[0]
+        else:
+            return tankobon.Transform(self.labels[0], None, res)
 
     @classmethod
     def generate(cls, mode):

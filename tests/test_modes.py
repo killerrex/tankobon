@@ -22,7 +22,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 import unittest
 
-import tankobon
+from tankobon import Tankobon
+
 from tests.reference import Reference, LevelFmt
 
 
@@ -32,7 +33,7 @@ class TestWorkModesCase(unittest.TestCase):
         # Prepare the arguments
         args = ['Normal Series', 'nominal']
 
-        app = tankobon.Main(args=args)
+        app = Tankobon(args=args)
 
         print("Transform:")
         app.tree.pretty(as_log=False)
@@ -52,7 +53,7 @@ class TestWorkModesCase(unittest.TestCase):
         # Prepare the arguments
         args = ['Number 1', 'Num 1 in title']
 
-        app = tankobon.Main(args=args)
+        app = Tankobon(args=args)
 
         print("Transform:")
         app.tree.pretty(as_log=False)
@@ -74,7 +75,7 @@ class TestWorkModesCase(unittest.TestCase):
             '--vol-first=2', '--ch-first=4'
         ]
 
-        app = tankobon.Main(args=args)
+        app = Tankobon(args=args)
 
         print("Transform:")
         app.tree.pretty(as_log=False)
@@ -95,7 +96,7 @@ class TestWorkModesCase(unittest.TestCase):
             'Flat Volume', 'No Chapters', '--vol-flat'
         ]
 
-        app = tankobon.Main(args=args)
+        app = Tankobon(args=args)
 
         print("Transform:")
         app.tree.pretty(as_log=False)
@@ -116,7 +117,7 @@ class TestWorkModesCase(unittest.TestCase):
             'Start At 1', 'Reset Count', '--ch-flat'
         ]
 
-        app = tankobon.Main(args=args)
+        app = Tankobon(args=args)
 
         print("Transform:")
         app.tree.pretty(as_log=False)
@@ -137,7 +138,7 @@ class TestWorkModesCase(unittest.TestCase):
             'Just One', 'Single Vol', '--single'
         ]
 
-        app = tankobon.Main(args=args)
+        app = Tankobon(args=args)
 
         print("Transform:")
         app.tree.pretty(as_log=False)
@@ -151,6 +152,7 @@ class TestWorkModesCase(unittest.TestCase):
         expected.pretty(as_log=False)
 
         self.assertEqual(app.tree, expected)
+
 
 if __name__ == '__main__':
     unittest.main()

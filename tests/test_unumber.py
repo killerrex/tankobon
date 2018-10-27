@@ -40,14 +40,14 @@ class TestUNumber(unittest.TestCase):
         Convert roman numbers to decimal
         """
         for v in self.probes:
-            self.assertEquals(v, UNumber.from_roman(self.probes[v]))
+            self.assertEqual(v, UNumber.from_roman(self.probes[v]))
 
     def test_to_roman(self):
         """
         Convert Decimal numbers to roman
         """
         for v in self.probes:
-            self.assertEquals(UNumber.to_roman(v), self.probes[v])
+            self.assertEqual(UNumber.to_roman(v), self.probes[v])
 
     def test_exhaustive(self):
         """
@@ -61,7 +61,7 @@ class TestUNumber(unittest.TestCase):
             c = UNumber(n)
             r = '{:r}'.format(c)
             v = UNumber(r)
-            self.assertEquals(c, v)
+            self.assertEqual(c, v)
 
     def test_extract_numbers(self):
         """
@@ -78,7 +78,7 @@ class TestUNumber(unittest.TestCase):
             num = [UNumber(x) for x in num]
 
             values = UNumber.extract_numbers(txt, roman)
-            self.assertEquals(values, num)
+            self.assertEqual(values, num)
 
     def test_is_normal(self):
         """
