@@ -1,5 +1,3 @@
-# coding=utf-8
-
 """
 This file is part of Tankobon Organiser
 
@@ -25,14 +23,16 @@ Structure to represent
     - With 0 or more chapters
 """
 
+from __future__ import annotations
+
+from pathlib import Path
 import logging
-import os
 import re
 from functools import total_ordering
 
-from tankobon.options import OptGroup, Options
-from tankobon.transform import Transform
-from tankobon.unumber import UNumber
+from .options import OptGroup, Options
+from .transform import Transform
+from .unumber import UNumber
 
 _logger = logging.getLogger('tankobon')
 
@@ -84,14 +84,14 @@ class Base:
         self._virtual = False
         self._hoaxes = []
 
-    def path(self):
+    def path(self) -> Path:
         """
         Get the current real path to this element.
 
         Returns:
             Base implementation uses the element name as path.
         """
-        return self._name
+        return Path(self._name)
 
     def _listdir(self):
         """
@@ -102,13 +102,10 @@ class Base:
         """
         path = self.path()
 
-        if not os.path.isdir(path):
+        if not path.is_dir():
             return []
 
-        children = [
-            s for s in os.listdir(path)
-            if os.path.isdir(os.path.join(path, s))
-            ]
+        children = [s.name for s in path.glob('*') if s.is_dir()]
         return sorted(children)
 
     def spurious(self):
@@ -127,7 +124,7 @@ class Base:
             level = []
         return self._hoaxes[:], level
 
-    def wide(self, level=0):
+    def wide(self, level=0) -> int:
         """
         Wide to represent all the numbers for the level required.
 
@@ -199,7 +196,7 @@ class Node(Base):
         _extra: Label to add for the special chapters, or None
     """
 
-    def __init__(self, parent, name, expected, opt: OptGroup):
+    def __init__(self, parent: Base, name, expected, opt: OptGroup):
         """
         Extract the number number from the name.
 
@@ -213,9 +210,6 @@ class Node(Base):
             AssertionError: The parent is not a Base object.
         """
         super().__init__(name)
-
-        assert(isinstance(parent, Base))
-
         self._parent = parent
         self._option = opt
         self._extra = None
@@ -283,7 +277,7 @@ class Node(Base):
 
         return numbers
 
-    def _guess(self, expected, numbers):
+    def _guess(self, expected, numbers) -> (UNumber, list):
         """
         Decide the best number of a set as value for the Element.
 
@@ -341,19 +335,21 @@ class Node(Base):
         # Isolate all the numbers from the name
         numbers = UNumber.extract_numbers(self._name, self._option.roman)
 
-        self._number = None
+        number = None
         if len(numbers) > 0:
             # Remove any spurious value
             numbers = self._rm_spurious(numbers)
             # Finally decide from the expected values
-            self._number, hoax = self._guess(expected, numbers)
+            number, hoax = self._guess(expected, numbers)
             self._hoaxes.extend(hoax)
 
-        if self._number is None:
+        if number is None:
             # This is an bonus number, use the 'bonus' label
             _logger.debug("  Bonus {}".format(type(self).__name__))
             self._extra = self._option.bonus
             return
+
+        self._number = number
 
         # The intermediate chapters are never expected...
         if not self._number.is_normal():
@@ -366,7 +362,7 @@ class Node(Base):
             _logger.info("%s: Special as %s not in %s", self.path(), n, str(expected))
             self._extra = self._option.special
 
-    def __eq__(self, other):
+    def __eq__(self, other: Node):
         """
         Check equality.
 
@@ -378,7 +374,8 @@ class Node(Base):
         Raises:
             AssertionError: The other is not a Node instance
         """
-        assert(isinstance(other, Node))
+        if not isinstance(other, Node):
+            return NotImplemented
 
         def check(a, b):
             return (a is None and b is None) or a == b
@@ -388,10 +385,7 @@ class Node(Base):
             check(self._extra, other._extra)
         )
 
-    def __ne__(self, other):
-        return not self.__eq__(other)
-
-    def __lt__(self, other):
+    def __lt__(self, other: Node):
         """
         Order the Nodes by number.
 
@@ -403,7 +397,8 @@ class Node(Base):
         Raises:
             AssertionError: The other is not a Node instance
         """
-        assert(isinstance(other, Node))
+        if not isinstance(other, Node):
+            return NotImplemented
 
         if self._number is None:
             return False
@@ -428,9 +423,9 @@ class Node(Base):
             The nested path to this element
         """
         if self._parent is None or self._parent._virtual:
-            return self._name
+            return Path(self._name)
         else:
-            return os.path.join(self._parent.path(), self._name)
+            return self._parent.path() / self._name
 
     def wide(self, level=0):
         """
@@ -490,13 +485,16 @@ class Node(Base):
 
             elif part == '%n':
                 if self._number:
-                    part = '{:0{w}d}'.format(self._number, w=self.wide())
+                    if self._option.force:
+                        part = '{:0{w}f}'.format(self._number, w=self.wide())
+                    else:
+                        part = '{:0{w}d}'.format(self._number, w=self.wide())
                 else:
                     part = self._extra
 
             elif part == '%r':
                 if self._number:
-                    part = '{:r}'.format(self._number)
+                    part = f'{self._number:r}'
                 else:
                     part = self._extra
 
@@ -550,16 +548,13 @@ class Node(Base):
         return res.rstrip()
 
     def __repr__(self):
-        return "<{} {}>".format(type(self).__name__, self._number)
+        return f"<{type(self).__name__} {self._number}>"
 
     def __str__(self):
         if self._parent:
-            return "{}:{} {}>".format(
-                str(self._parent),
-                type(self).__name__, self._number
-            )
+            return f"{self._parent!s}:{type(self).__name__} {self._number}>"
         else:
-            return "{} {}".format(type(self).__name__, self._number)
+            return f"{type(self).__name__} {self._number}"
 
     def transform(self):
         """
@@ -602,11 +597,10 @@ class Volume(Node):
             opts: Options for the chapters
 
         Returns:
-            Biggest index of the subnodes
+            Biggest index of the sub-nodes
 
         Raises:
             EmptyFolderError: A volume cannot be empty
-
         """
 
         if last is None:
@@ -646,7 +640,7 @@ class Volume(Node):
             txt = format(self)
             if txt in seen:
                 n = seen[txt] + 1
-                c._extra += " " + str(n)
+                c._extra += f" {n}"
             else:
                 n = 1
             seen[txt] = n
@@ -701,7 +695,7 @@ class Series(Base):
         Args:
             opts: Options for the whole collection.
         """
-        super().__init__(opts.root)
+        super().__init__(str(opts.root))
 
         if opts.single:
             self._virtual = True
@@ -725,7 +719,7 @@ class Series(Base):
 
         if opts.single:
             # The target is just a single book
-            nodes = [self.path()]
+            nodes = [str(self.path())]
             expected = []
             v_wide = 2
             # As a single book, no bonus or extra for volume level
@@ -740,22 +734,22 @@ class Series(Base):
 
         self._wides[1] = v_wide
 
-        childs = [Volume(self, v, expected, opts.volume) for v in nodes]
-        if len(childs) != len(nodes):
+        children = [Volume(self, v, expected, opts.volume) for v in nodes]
+        if len(children) != len(nodes):
             # Some Volume missing, report
             _logger.error('Missing Volumes {}'.format(expected))
 
-        childs.sort()
+        children.sort()
 
         # Do not search for chapters in flat mode
         if opts.volume.flat:
-            self._nodes = childs
+            self._nodes = children
             return
 
         # Now sub-populate
         nxt = None
         ch_wide = 0
-        for vol in childs:
+        for vol in children:
             try:
                 nxt = vol.populate(nxt, opts.chapter)
             except ValueError as err:

@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-# coding=utf-8
-
 """
 This file is part of Tankobon Organiser
 
@@ -20,12 +17,13 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <http://www.gnu.org/licenses/>.
 """
 
-import unittest
-
 from tankobon import UNumber
 
+import pytest
 
-class TestUNumber(unittest.TestCase):
+
+@pytest.fixture
+def probes():
     probes = {
         1: 'I', 4: 'IV', 5: 'V', 9: 'IX',
         10: 'X', 12: 'XII', 14: 'XIV', 19: 'XIX', 48: 'XLVIII',
@@ -34,55 +32,61 @@ class TestUNumber(unittest.TestCase):
         500: 'D', 793: 'DCCXCIII',
         1000: 'M', 4999: 'MMMMCMXCIX'
     }
+    return probes
 
-    def test_from_roman(self):
-        """
-        Convert roman numbers to decimal
-        """
-        for v in self.probes:
-            self.assertEqual(v, UNumber.from_roman(self.probes[v]))
 
-    def test_to_roman(self):
-        """
-        Convert Decimal numbers to roman
-        """
-        for v in self.probes:
-            self.assertEqual(UNumber.to_roman(v), self.probes[v])
+def test_from_roman(probes):
+    """
+    Convert roman numbers to decimal
+    """
+    for v in probes:
+        assert v == UNumber.from_roman(probes[v])
 
-    def test_exhaustive(self):
-        """
-        Test the transformation of all the numbers from 1 to 4999
 
-        note: This is different to the previous test, where pre-known
-              pairs are tested. Here only implementation errors are
-              detected, not design errors like D being 50 instead of 500.
-        """
-        for n in range(1, 5000):
-            c = UNumber(n)
-            r = '{:r}'.format(c)
-            v = UNumber(r)
-            self.assertEqual(c, v)
+def test_to_roman(probes):
+    """
+    Convert Decimal numbers to roman
+    """
+    for v in probes:
+        assert UNumber.to_roman(v) == probes[v]
 
-    def test_extract_numbers(self):
-        """
-        Read numbers from strings
-        """
-        lines = {
-            (4, 5): 'Normal line 4 and 5',
-            (4.5, 6): 'Line with 4.5 and 6',
-            (10, 45): 'Roman X and XLV'
-        }
 
-        for num, txt in lines.items():
-            roman = txt.startswith('Roman')
-            num = [UNumber(x) for x in num]
+def test_exhaustive():
+    """
+    Test the transformation of all the numbers from 1 to 4999
 
-            values = UNumber.extract_numbers(txt, roman)
-            self.assertEqual(values, num)
+    note: This is different to the previous test, where pre-known
+          pairs are tested. Here only implementation errors are
+          detected, not design errors like swapping D and L in the definition.
+    """
+    for n in range(1, 5000):
+        c = UNumber(n)
+        r = f'{c:r}'
+        v = UNumber(r)
+        assert c == v
 
-    def test_is_normal(self):
-        """
-        Check if a UNumber has decimal part
-        """
-        self.assertTrue(UNumber(14).is_normal())
-        self.assertFalse(UNumber(14.5).is_normal())
+
+def test_extract_numbers():
+    """
+    Read numbers from strings
+    """
+    lines = {
+        (4, 5): 'Normal line 4 and 5',
+        (4.5, 6): 'Line with 4.5 and 6',
+        (10, 45): 'Roman X and XLV'
+    }
+
+    for num, txt in lines.items():
+        roman = txt.startswith('Roman')
+        num = [UNumber(x) for x in num]
+
+        values = UNumber.extract_numbers(txt, roman)
+        assert values == num
+
+
+def test_is_normal():
+    """
+    Check if a UNumber has decimal part
+    """
+    assert UNumber(14).is_normal()
+    assert not UNumber(14.5).is_normal()

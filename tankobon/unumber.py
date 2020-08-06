@@ -83,10 +83,12 @@ class UNumber:
         highest = 0
         for c in reversed(txt.upper()):
             if c not in cls._R_VALUES:
-                raise ValueError('Invalid roman character: ' + txt)
+                raise ValueError(f'Invalid roman character [{c}] in {txt}')
 
             v = cls._R_VALUES[c]
             if v >= highest:
+                # The position is bigger than the last bigger value:
+                # Changing from V to X or C or ...
                 value += v
                 highest = v
                 continue
@@ -95,7 +97,7 @@ class UNumber:
             # 5 or 10 times smaller, so the valid sets are:
             # I only with V, X; X only with L, C; C only with D, M
             if v not in (1, 10, 100) or highest // v > 10:
-                raise ValueError('Invalid roman numeral: ' + txt)
+                raise ValueError(f'Invalid roman numeral in {txt} ({c} out of order)')
             value -= v
         return value
 
@@ -124,13 +126,13 @@ class UNumber:
         if not 0 < value < 5000:
             raise ValueError("Out of valid range [1,4999]")
 
-        txt = ""
+        res = []
         scale = 0
         while value > 0:
             value, n = divmod(value, 10)
-            txt = cls._R_INV[scale][n] + txt
+            res.append(cls._R_INV[scale][n])
             scale += 1
-        return txt
+        return ''.join(reversed(res))
 
     @classmethod
     def extract_numbers(cls, txt: str, roman=False):
@@ -150,6 +152,9 @@ class UNumber:
             pattern = cls._A_Match
 
         return [cls(s) for s in pattern.findall(txt)]
+
+    # Add slots to avoid adding new attributes
+    __slots__ = ('_value', '_dec')
 
     def __init__(self, txt):
         """
@@ -177,20 +182,24 @@ class UNumber:
             self._dec = None
 
     def __str__(self):
-        if self._dec:
-            return "{0._value}.{0._dec}".format(self)
+        """
+        String representation. Add a decimal part only if is not None (0 will output n.0)
+        """
+        if self._dec is None:
+            return str(self._value)
         else:
-            return "{._value}".format(self)
+            return f"{self._value}.{self._dec}"
 
     def __repr__(self):
-        return "{}({})".format(self.__class__.__name__, str(self))
+        return f"{type(self).__name__}({self})"
 
-    def __format__(self, format_spec):
+    def __format__(self, format_spec: str):
         """
         Format the number following a specification
 
         The valid format specifications are:
-        - Same as %d for arabic format
+        - Same as d for arabic format
+        - Using f instead of d => force the usage of decimals
         - 'r' for roman format.
 
         Args:
@@ -200,13 +209,26 @@ class UNumber:
             the formatted string
         """
         if format_spec == 'r':
-            s = self.to_roman(self._value)
-        else:
-            s = format(self._value, format_spec)
-        if self._dec:
-            return "{}.{}".format(s, self._dec)
-        else:
+            # no decimals for roman numbers
+            return self.to_roman(self._value)
+
+        if format_spec.endswith('f'):
+            # User wants to use float format
+            if self._dec is None:
+                dec = 0
+            else:
+                dec = self._dec
+            # Get first a float
+            f = float(f'{self._value}.{dec}')
+            return format(f, format_spec)
+
+        # Ok, normal decimal
+        s = format(self._value, format_spec)
+
+        if self._dec is None:
             return s
+        else:
+            return f"{s}.{self._dec}"
 
     def __int__(self):
         """
@@ -245,9 +267,6 @@ class UNumber:
             return abs(float(self) - other) <= sys.float_info.epsilon
         else:
             return int(self) == other
-
-    def __ne__(self, other):
-        return not self.__eq__(other)
 
     def __hash__(self):
         return hash(self._value) ^ hash(self._dec)

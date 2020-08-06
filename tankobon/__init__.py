@@ -1,5 +1,3 @@
-# coding=utf-8
-
 """
 Tankobon Organiser Module
 
@@ -73,6 +71,10 @@ class Tankobon:
         return 0
 
 
+__version__ = '1.1'
+
+
 __all__ = [
+    '__version__',
     'UNumber', 'OptGroup', 'Options', 'Transform', 'Chapter', 'Volume', 'Series', 'Tankobon'
 ]

@@ -1,5 +1,3 @@
-# coding=utf-8
-
 """
 This file is part of Tankobon Organiser
 
@@ -22,12 +20,22 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 Transform objects store the mapping between the old and new names,
 and the correct order to rename them.
 """
-import os
-import shutil
+
+from pathlib import Path
+from enum import Enum
 
 import logging
 
 _logger = logging.getLogger('tankobon')
+
+
+class WorkMode(Enum):
+    # Just describe what it is found
+    REPORT = 'report'
+    # Show the bash commands but do nothing
+    DRY_RUN = 'dry-run'
+    # Really perform the renaming
+    ENABLE = 'enable'
 
 
 class Transform:
@@ -43,14 +51,14 @@ class Transform:
     """
     _Tab = '    '
 
-    def __init__(self, old, new, nested=None):
+    def __init__(self, old: str, new: str = None, nested=None):
         """
         Create a transform from old to new.
         Use nested argument for directory transforms
 
         Args:
             old: Old name
-            new: New name
+            new: New name. Set it to None to use the same name, but move the folder.
             nested: list of Transform objects or None
         """
         super().__init__()
@@ -65,6 +73,20 @@ class Transform:
             assert(isinstance(obj, Transform))
             self._nested.append(obj)
 
+    @property
+    def old(self) -> str:
+        """
+        Existing name
+        """
+        return self._old
+
+    @property
+    def new(self) -> str:
+        """
+        New name
+        """
+        return self._new
+
     def _two_cols(self, tabs=''):
         """
         Get a two columns transform schema
@@ -72,14 +94,11 @@ class Transform:
         Return:
             [old], [new]
         """
-        old = ['{}{}'.format(tabs, self._old)]
+        old = [f'{tabs}{self._old}']
         if self._new is None:
-            new = [old[0]]
+            new = list(old)
         else:
-            new = ['{}{}'.format(tabs, self._new)]
-
-        if self._nested is None:
-            return old, new
+            new = [f'{tabs}{self._new}']
 
         # Now the nested ones...
         tabs += self._Tab
@@ -104,14 +123,14 @@ class Transform:
 
         c = max(len(s) for s in old)
         for o, n in zip(old, new):
-            txt = o.ljust(c) + ' ==> ' + n
+            txt = f'{o:<{c}s} ==> {n}'
 
             if as_log:
                 _logger.info(txt)
             else:
                 print(txt)
 
-    def run(self, dry, path=None):
+    def run(self, dry: bool, path: Path = None):
         """
         Rename the files and directories.
 
@@ -119,11 +138,10 @@ class Transform:
             dry: Just simulate the execution
             path: Base path to apply this transform
         """
-        if path:
-            old = os.path.join(path, self._old)
-        else:
-            old = self._old
-            path = "."
+        if not path:
+            path = Path.cwd()
+
+        old = path / self._old
 
         # First move all the child
         for sub in self._nested:
@@ -134,14 +152,21 @@ class Transform:
             # This is the root
             return
 
-        new = os.path.join(path, self._new)
+        new = path / self._new
 
         # Now transform this element
-        if dry:
+        try:
+            r = new.resolve(strict=True)
+            is_same = old.samefile(r)
+        except FileNotFoundError:
+            is_same = False
+        if is_same:
+            _logger.debug("Same folders: '%s' '%s';", old, new)
+        elif dry:
             _logger.info("mv '%s' '%s';", old, new)
         else:
             _logger.debug("mv '%s' '%s';", old, new)
-            shutil.move(old, new)
+            old.replace(new)
 
     def __eq__(self, other):
         """
@@ -176,16 +201,26 @@ class Transform:
         """
         name = type(self).__name__
         if len(self._nested) == 0:
-            return "{}({}, {})".format(name, self._old, self._new)
+            extra = ', ...'
         else:
-            return "{}({}, {}, ...)".format(name, self._old, self._new)
+            extra = ''
 
-    def __call__(self, action, *args, **kwargs):
-        if action == 'report':
+        return f'{name}({self._old!r}, {self._new!r}{extra})'
+
+    def __call__(self, action: WorkMode, *args, **kwargs):
+        """
+        Realize the transformation (or report about it)
+
+        Args:
+            action: Work mode
+            *args: Extra arguments to run or pretty
+            **kwargs: Extra arguments to run or pretty
+        """
+        if action is WorkMode.REPORT:
             self.pretty(*args, **kwargs)
-        elif action == 'dryrun':
+        elif action is WorkMode.DRY_RUN:
             self.run(True, *args, **kwargs)
-        elif action == 'enable':
+        elif action is WorkMode.ENABLE:
             self.run(False, *args, **kwargs)
         else:
             raise RuntimeError(f'Unknown action {action}')

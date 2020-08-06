@@ -1,5 +1,3 @@
-# coding=utf-8
-
 """
 This file is part of Tankobon Organiser
 
@@ -23,15 +21,17 @@ Parse the user options and return a nice object
 with all the fields classified.
 """
 
+from pathlib import Path
 from xdg import BaseDirectory
 
 import argparse
-from collections import OrderedDict
-import os
 
 import logging
 
 import configparser
+
+
+from .transform import WorkMode
 
 
 class ActionFlag(argparse.Action):
@@ -49,6 +49,7 @@ class ActionFlag(argparse.Action):
     _Negate = '--no-'
     """Prefix used for the negate form of the options"""
 
+    # noinspection PyShadowingBuiltins
     def __init__(self, option_strings, dest, default=None, required=False, help=None):
         """
         Create a Flag Action with enable/disable options.
@@ -128,9 +129,9 @@ class OptDict:
 
     def __repr__(self):
         s = [
-            '{}={}'.format(key, getattr(self, key)) for key in vars(self)
+            f'{key}={getattr(self, key)}' for key in vars(self)
             if not key.startswith('_')
-            ]
+        ]
         return '{}({})'.format(type(self).__name__, ', '.join(s))
 
     def __getitem__(self, item):
@@ -189,7 +190,7 @@ class OptGroup(OptDict):
         label: String to use as series name at this level
         roman: Flag to select arabic or roman formats
         first: Specify the number of the first element instead of 1
-        flat: Element with no subelements or start counting in each container.
+        flat: Element with no sub-elements or start counting in each container.
         template: Format used for this level
         upper: String used to tag the parent numbers at this level
                So at chapter level this is the 'V' that goes with volume.
@@ -198,7 +199,7 @@ class OptGroup(OptDict):
         bonus: suffix to add to the bonus chapters
     """
 
-    def __init__(self, name: str, prefix: str=None, **kwargs):
+    def __init__(self, name: str, prefix: str = None, **kwargs):
         """
         Create a default options group
 
@@ -230,6 +231,7 @@ class OptGroup(OptDict):
         self.template = '%l%_%t%u %p%n%s'
         self.upper = None
         self.wide = -1  # Auto
+        self.force = False
         self.special = ' Special'
         self.bonus = 'Bonus'
 
@@ -243,17 +245,18 @@ class OptGroup(OptDict):
         Args:
             config: The ConfigParser object
         """
-        d = OrderedDict()
-        d['roman'] = self.roman
-        d['first'] = self.first
-        d['flat'] = self.flat
-        d['template'] = self.template
-        d['prefix'] = self.prefix
-        d['upper'] = self.upper
-        d['wide'] = self.wide
-        d['special'] = self.special
-        d['bonus'] = self.bonus
-        config[self._name] = d
+        config[self._name] = {
+            'roman': self.roman,
+            'first': self.first,
+            'flat': self.flat,
+            'template': self.template,
+            'prefix': self.prefix,
+            'upper': self.upper,
+            'wide': self.wide,
+            'force': self.force,
+            'special': self.special,
+            'bonus': self.bonus
+        }
 
     def load(self, config):
         """
@@ -272,6 +275,7 @@ class OptGroup(OptDict):
         self.prefix = sub.get('prefix', vars=self)
         self.upper = sub.get('upper', vars=self)
         self.wide = sub.getint('wide', vars=self)
+        self.force = sub.getfloat('force', vars=self)
         self.special = sub.get('special', vars=self)
         self.bonus = sub.get('bonus', vars=self)
 
@@ -292,84 +296,112 @@ class OptGroup(OptDict):
         name = self._name
 
         group = parser.add_argument_group(
-            title='{} Options'.format(name),
-            description='Options to control the input and output of {} level'.format(name)
+            title=f'{name} Options',
+            description=f'Options to control the input and output of {name} level'
         )
 
         # Search for roman numerals in the input?
         g = group.add_argument(
-            '--{}-roman'.format(tag), action=ActionFlag, default=self.roman,
-            help='Search for roman numerals in {} names'.format(name)
+            f'--{tag}-roman', action=ActionFlag, default=self.roman,
+            help=f'Search for roman numerals in {name} names'
         )
         self._map[g.dest] = 'roman'
 
         # Number of the first element
         g = group.add_argument(
-            '--{}-first'.format(tag), type=int, default=self.first,
-            metavar='N', help='Number of the first {}'.format(name)
+            f'--{tag}-first', type=int, default=self.first,
+            metavar='N', help=f'Number of the first {name}'
         )
         self._map[g.dest] = 'first'
 
         # Is a flat element: This depends of volumes/chapters...
         if is_bottom:
-            h = 'Flat {}, elements restarts the count in each container'
+            h = f'Flat {name}, elements restarts the count in each container'
         else:
-            h = 'Flat {}, with no sub levels'
+            h = f'Flat {name}, with no sub levels'
         g = group.add_argument(
-            '--{}-flat'.format(tag), action=ActionFlag, default=self.flat,
-            help=h.format(name)
+            f'--{tag}-flat', action=ActionFlag, default=self.flat, help=h
         )
         self._map[g.dest] = 'flat'
         # Add the opposite, so it is possible to overwrite
 
         # Output name template
         g = group.add_argument(
-            '--{}-template'.format(tag), default=self.template,
-            metavar='TPL', help='Template for {} output names'.format(name)
+            f'--{tag}-template', default=self.template,
+            metavar='TPL', help=f'Template for {name} output names'
         )
         self._map[g.dest] = 'template'
 
         # Level memo letter to use
         g = group.add_argument(
-            '--{}-prefix'.format(tag), default=self.prefix, metavar='TAG',
-            help='Prefix of the {} level (default: %(default)s)'.format(name)
+            f'--{tag}-prefix', default=self.prefix, metavar='TAG',
+            help=f'Prefix of the {name} level (default: %(default)s)'
         )
         self._map[g.dest] = 'prefix'
 
         # Parent level memo (if any)
         g = group.add_argument(
-            '--{}-upper'.format(tag), default=self.upper, metavar='TAG',
-            help='Prefix for the {} parent level (default: %(default)s)'.format(name)
+            f'--{tag}-upper', default=self.upper, metavar='TAG',
+            help=f'Prefix for the {name} parent level (default: %(default)s)'
         )
         self._map[g.dest] = 'upper'
 
         # Number of digits in the output
         g = group.add_argument(
-            '--{}-wide'.format(tag), type=int, default=self.wide, metavar='W',
-            help='Digits in the {} numbers (default: auto)'.format(name)
+            f'--{tag}-wide', type=int, default=self.wide, metavar='W',
+            help=f'Digits in the {name} numbers (default: auto)'
         )
         self._map[g.dest] = 'wide'
 
+        # Force usage of decimal
+        g = group.add_argument(
+            f'--{tag}-float', action='store_true',
+            help=f'Force to use decimal value in the {name} numbers (default: False)'
+        )
+        self._map[g.dest] = 'force'
+
         # Label to use
         g = group.add_argument(
-            '--{}-label'.format(tag), metavar='TXT',
-            help='Label to use for {} (default: series name)'.format(name)
+            f'--{tag}-label', metavar='TXT',
+            help=f'Label to use for {name} (default: series name)'
         )
         self._map[g.dest] = 'label'
 
         # Special name
         g = group.add_argument(
-            '--{}-special'.format(tag), default=self.special, metavar='TXT',
-            help='Additional text for {} numbered items out of the sequence'.format(name)
+            f'--{tag}-special', default=self.special, metavar='TXT',
+            help=f'Additional text for {name} numbered items out of the sequence'
         )
         self._map[g.dest] = 'special'
 
-        # Special name
+        # Bonus name
         g = group.add_argument(
-            '--{}-bonus'.format(tag), default=self.bonus, metavar='TXT',
-            help='Text for the number in the {} bonus entries'.format(name)
+            f'--{tag}-bonus', default=self.bonus, metavar='TXT',
+            help=f'Text for the number in the {name} bonus entries'
         )
         self._map[g.dest] = 'bonus'
+
+
+_Description = """
+Sort Manga series to obtain uniform volume/chapter tree.
+Identify the numbers from the directory names, even if they are
+in roman numerals."""
+
+_Epilog = """
+Notice that by default the tool just report, as in a dry run.
+Label syntax:
+    %l: Label
+    %m: Real name
+    %n: Number, using the level wide
+    %r: Number in roman numerals
+    %p: Prefix
+    %s: Suffix text, only if no bonus (i.e. has a valid number)
+    %u: Parent (upper) number
+    %R: Parent Number in roman numerals
+    %t: Parent prefix
+    %_: Blank space only if parent is valid
+    %%: Literal %
+"""
 
 
 class Options(OptDict):
@@ -409,20 +441,20 @@ class Options(OptDict):
             The config file or None
         """
         if store:
-            d = BaseDirectory.save_config_path(prog)
-            f = os.path.join(d, cls.Config)
-            return open(f, 'wt')
+            d = Path(BaseDirectory.save_config_path(prog))
+            f = d / cls.Config
+            return f.open('wt')
 
         d = BaseDirectory.load_first_config(prog)
         if d is None:
             return None
-        f = os.path.join(d, cls.Config)
-        if os.path.isfile(f):
-            return open(f, 'r')
+        f = Path(d) / cls.Config
+        if f.is_file():
+            return f.open('r')
         else:
             return None
 
-    def __init__(self, prog: str=None, args=None):
+    def __init__(self, prog: str = None, args=None):
         """
         Parse the options in a nice object...
 
@@ -432,31 +464,16 @@ class Options(OptDict):
         """
         super().__init__()
 
+        # noinspection PyTypeChecker
         parser = argparse.ArgumentParser(
-            formatter_class=argparse.RawDescriptionHelpFormatter,
-            description="""
-Sort Manga series to obtain uniform volume/chapter tree.
-Identify the numbers from the directory names, even if they are
-in roman numerals.""",
-            epilog="""
-Notice that by default the tool just report, as in a dry run.
-Label syntax:
-    %l: Label
-    %m: Real name
-    %n: Number, using the level wide
-    %r: Number in roman numerals
-    %p: Prefix
-    %s: Suffix text, only if no bonus (i.e. has a valid number)
-    %u: Parent (upper) number
-    %R: Parent Number in roman numerals
-    %t: Parent prefix
-    %_: Blank space only if parent is valid
-    %%: Literal %
-""")
+            description=_Description,
+            epilog=_Epilog,
+            formatter_class=argparse.RawDescriptionHelpFormatter
+        )
         # General options
         self.name = None
         self.root = None
-        self.action = 'report'
+        self.action = WorkMode.REPORT
         self.single = False
         self.log = 'info'
         self.hoax = []
@@ -497,7 +514,11 @@ Label syntax:
                 args.store = self.get_ini(prog, True)
             config.write(args.store)
 
-        assert(os.path.isdir(self.root))
+        if not self.root:
+            raise ValueError('Root cannot be empty')
+
+        if not self.root.is_dir():
+            raise ValueError(f'Root is not a folder: {self.root}')
 
         if self.volume.label is None:
             self.volume.label = self.name
@@ -517,8 +538,8 @@ Label syntax:
         if self.Label not in config:
             return
         sub = config[self.Label]
-        self.single = sub.getboolen('single', vars=self)
-        self.action = sub.getboolean('action', vars=self)
+        self.single = sub.getboolean('single', vars=self)
+        self.action = WorkMode(sub.get('action', vars=self))
         self.log = sub.get('log', vars=self)
         self.hoax = [int(s) for s in sub.get('hoax', vars=self).split()]
 
@@ -529,12 +550,12 @@ Label syntax:
         Args:
             config: a ConfigParser object
         """
-        d = OrderedDict()
-        d['single'] = self.single
-        d['action'] = self.action
-        d['log'] = self.log
-        d['hoax'] = ' '.join(str(n) for n in self.hoax)
-        config[self.Label] = d
+        config[self.Label] = {
+            'single': self.single,
+            'action': self.action.value,
+            'log': self.log,
+            'hoax': ' '.join(str(n) for n in self.hoax)
+        }
         self.volume.store(config)
         self.chapter.store(config)
 
@@ -545,12 +566,12 @@ Label syntax:
         Args:
             parser: An ArgParse object
         """
-        g = parser.add_argument("name", help="Name of the series")
+        g = parser.add_argument('name', help='Name of the series')
         self._map[g.dest] = 'name'
 
         g = parser.add_argument(
-            "root", nargs='?', default=".",
-            help="Root directory of the series"
+            'root', type=Path, nargs='?', default='.',
+            help='Root directory of the series'
         )
         self._map[g.dest] = 'root'
 
@@ -573,7 +594,8 @@ Label syntax:
         self._map[g.dest] = 'single'
 
         g = parser.add_argument(
-            '--action', choices=['report', 'dryrun', 'enable'],
+            '--action', choices=[act.value for act in WorkMode],
+            type=WorkMode,
             default=self.action,
             help='Working mode of the program. Dry run prints the mv commands'
         )
@@ -581,15 +603,15 @@ Label syntax:
 
         # Add some alias to --action
         parser.add_argument(
-            '--report', action='store_const', dest='action', const='report',
+            '--report', action='store_const', dest='action', const=WorkMode.REPORT,
             help='Just report the structure found. Equal to --action=report'
         )
         parser.add_argument(
-            '--dry-run', action='store_const', dest='action', const='dryrun',
+            '--dry-run', action='store_const', dest='action', const=WorkMode.DRY_RUN,
             help='Echo the mv actions. Equal to --action=dryrun'
         )
         parser.add_argument(
-            '--enable', action='store_const', dest='action', const='enable',
+            '--enable', action='store_const', dest='action', const=WorkMode.ENABLE,
             help='Move the directories to the new names. Equal to --action=enable'
         )
 

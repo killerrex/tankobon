@@ -1,6 +1,3 @@
-#!/usr/bin/env python3
-# coding=utf-8
-
 """
 This file is part of Tankobon Organiser
 
@@ -22,6 +19,8 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 This module contains test helpers for the tankobon tool
 """
+
+from pathlib import Path
 import tankobon
 
 
@@ -110,6 +109,35 @@ class Reference:
         assert(len(volumes) == len(chapters))
         self.chapters = chapters
 
+    def deploy(self, root: Path):
+
+        # Create the series root
+        if self.labels[0] is not None:
+            series = root / self.labels[0]
+            series.mkdir()
+        else:
+            series = root
+
+        for v, chapters in zip(self.volumes, self.chapters):
+            if v is None:
+                # This is a single volume
+                vol = series / self.labels[1]
+                v_label = ''
+            else:
+                v_label = f' v{v:02d}'
+                vol = series / f'{self.labels[1]}{v_label}'
+            vol.mkdir()
+
+            for c in chapters:
+                if isinstance(c, str):
+                    fmt = c
+                elif isinstance(c, int):
+                    fmt = f'c{c:02d}'
+                else:
+                    fmt = f'c{c:04.1f}'
+                ch = vol / f'{self.labels[2]}{v_label} {fmt}'
+                ch.mkdir()
+
     def __call__(self, name, vfmt, cfmt, extra):
         """
         Create a fake transform with the given specs for
@@ -133,7 +161,7 @@ class Reference:
 
         res = []
         for v, cha in zip(self.volumes, self.chapters):
-            # First the childs
+            # First the child
             nested = []
 
             if v is None:
