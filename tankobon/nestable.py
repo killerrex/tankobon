@@ -69,6 +69,7 @@ class Base:
         _virtual: True if this element shall not produce a transform
         _hoaxes: List of numbers present in this level name not related
                  with the real number
+        _glob: Pattern to select folders for the sub-levels
     """
 
     def __init__(self, name: str):
@@ -83,6 +84,7 @@ class Base:
         self._number = None
         self._virtual = False
         self._hoaxes = []
+        self._glob = '*'
 
     def path(self) -> Path:
         """
@@ -105,7 +107,7 @@ class Base:
         if not path.is_dir():
             return []
 
-        children = [s.name for s in path.glob('*') if s.is_dir()]
+        children = [s.name for s in path.glob(self._glob) if s.is_dir()]
         return sorted(children)
 
     def spurious(self):
@@ -716,6 +718,8 @@ class Series(Base):
         Args:
             opts: The program options
         """
+        if opts.glob:
+            self._glob = opts.glob
 
         if opts.single:
             # The target is just a single book

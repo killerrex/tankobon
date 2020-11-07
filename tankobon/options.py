@@ -474,6 +474,7 @@ class Options(OptDict):
         self.name = None
         self.root = None
         self.action = WorkMode.REPORT
+        self.glob = '*'
         self.single = False
         self.log = 'info'
         self.hoax = []
@@ -538,6 +539,7 @@ class Options(OptDict):
         if self.Label not in config:
             return
         sub = config[self.Label]
+        self.glob = sub.get('glob', vars=self)
         self.single = sub.getboolean('single', vars=self)
         self.action = WorkMode(sub.get('action', vars=self))
         self.log = sub.get('log', vars=self)
@@ -551,6 +553,7 @@ class Options(OptDict):
             config: a ConfigParser object
         """
         config[self.Label] = {
+            'glob': self.glob,
             'single': self.single,
             'action': self.action.value,
             'log': self.log,
@@ -586,6 +589,12 @@ class Options(OptDict):
             '--store', type=argparse.FileType('w'), nargs='?',
             help='Write the config (optional, give a file)'
         )
+
+        g = parser.add_argument(
+            f'--glob', default=self.glob,
+            help=f'Glob expression to select folders (default %(default)s)'
+        )
+        self._map[g.dest] = 'glob'
 
         g = parser.add_argument(
             '--single', action=ActionFlag, default=self.single,
