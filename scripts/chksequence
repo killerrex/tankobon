@@ -1,0 +1,107 @@
+#!/bin/bash
+
+#
+# Verify the numeration order of a book
+#
+set -e
+
+for f in "$@"
+do
+    if [ ! -d "$f" ]
+    then
+        continue
+    fi
+
+    echo ""
+    echo "Looking in $f"
+    
+    # Look for miss-numbered pages
+    readarray -d '' pages < <(find "$f" -type f -not \( \
+        -name "[0-9][0-9][0-9].[jp][pn]g" -o \
+        -name "[0-9][0-9][0-9]-[0-9][0-9][0-9].[jp][pn]g" -o \
+        -name "000_Cover_v[0-9][0-9].[jp][pn]g" -o \
+        -name "000[a-z].[jp][pn]g" \
+        \) | sort)
+    
+    if [ ${#pages[@]} -ne 0 ]
+    then
+        echo ""
+        echo "Pages not following NNN.ext or NNN-NNN.ext:"
+        for p in "${pages[@]}"
+        do
+            echo "  $p"
+        done
+    fi
+    
+    echo ""
+    echo "Sequence:"
+    readarray -d '' pages < <(find "$f" \( -name "[0-9][0-9][0-9].[jp][pn]g" -o -name "[0-9][0-9][0-9]-[0-9][0-9][0-9].[jp][pn]g" \) -printf '%f\0' | sort -z)
+    
+    pages=("${pages[@]/.png}")
+    pages=("${pages[@]/.jpg}")
+
+    max="${#pages[@]}"
+
+    c=''
+    d="${pages[0]:0:3}"
+    # Correct the max Value:
+    max=$((max + d - 1))
+    n=$((10#$d))
+    low=$n
+    k=0
+    ok=0
+    while [ $k -lt ${#pages[@]} ] && [ $n -le ${max} ]
+    do
+        # Select the next valid page
+        p=${pages[$k]}
+    
+        if [ "${p/-}" != "$p" ]
+        then
+            # This is a double page
+            ((max+=1))
+            if [ $((10#${p:4:3} - 10#${p:0:3})) -ne 1 ]
+            then
+                # This is an invalid double page: skip it
+                echo "  Invalid double page: $p"
+                ((k+=1))
+                ((ok+=1))
+                continue
+            fi
+        fi
+
+        b=$c
+        c=$d
+        # In any case we will check the next number
+        ((n+=1))
+        d="$(printf %03d $n)"
+
+        if [ "$p" == "$c" ]
+        then
+            ((k+=1))
+        elif [ "$p" == "$c-$d" ]
+        then
+            ((n+=1))
+            d="$(printf %03d $n)"
+            ((k+=1))
+        elif [ "$p" == "$b-$c" ]
+        then
+            echo "  Duplicated double page number: $b-$c"
+            ((ok+=1))
+            ((k+=1))
+        else
+            echo "  Missing page $((n-1))"
+            ((ok+=1))
+        fi
+    done
+    if [ ${ok} -eq 0 ]
+    then
+        echo "All seems ok [$low --> $((n-1))]"
+    fi
+    echo ""
+done
+
+
+    
+
+
+

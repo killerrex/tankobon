@@ -1,0 +1,67 @@
+#!/bin/bash
+
+
+clean=0
+
+if [ $# -lt 1 ] || [ "$1" == "--help" ] || [ "$1" == "-h" ]
+then
+    cat <<-EOF
+Convert to CBZ
+
+cbzify [--rm] folder [folder]
+
+Add --rm to remove the folders once compressed
+EOF
+    exit 0
+fi
+
+# Action is long, so check first all the inputs
+for src in "$@"
+do
+    if [ "${src}" == '--rm' ]
+    then
+        echo "Folders will be removed"
+        clean=1
+        continue
+    fi
+    if [ "${src}" == '--keep' ]
+    then
+        clean=0
+        continue
+    fi
+
+    src=${src%/}
+    if [ ! -d "${src}" ]
+    then
+        echo "Not a folder: ${src}"
+        exit 2
+    fi
+
+    tgt="${src}.cbz"
+    if [ -e "${tgt}" ]
+    then
+        echo "Target exists: ${tgt}"
+        exit 3
+    fi
+done
+
+
+echo "Working..."
+for src in "$@"
+do
+    # Ignore the flags
+    [ "${src:0:2}" == '--' ] && continue
+
+    echo ""
+    src=${src%/}
+    tgt="${src}.cbz"
+    echo "Creating ${tgt}"
+    find "${src}" -print | sort | zip -9 "${tgt}" -@
+    if [ $clean == 1 ]
+    then
+        echo "Removing source folder..."
+        rm -rf "${src}"
+    fi
+    echo ""
+done
+

@@ -1,0 +1,424 @@
+#!/bin/bash
+
+# Common clean-up tasks
+
+
+usage() {
+
+cat <<EOF
+usage:
+    $(basename $0) [-Y] [--root=.] [modes...]
+all = chmod db ext digit kind hidden trim
+
+Options:
+  -Y | --yes: Allow the changes to happen (otherwise is a dry run)
+  --root folder: Start working from a folder instead of PWD
+  --force: Do not use -n in the mv commands.
+  --suffix: Suffix to remove instead the default ones
+
+Work Modes:
+  chmod:     Change the access rights of files and directories
+  db:        Remove all the Thumbs.db and similar files
+  ext:       Change upper to lower cases in the file extensions
+  digit:     Search files with a single digit name and add a 0 before
+  double:    Search files with a double digit name and add a 0 before
+  kind:      Check that the jpg and png files are what they say...
+  unpar:     Search files with the number inside () and remove the parentesis
+  unalpha:   Correct that weird alphabet-ordered directories... use with care!
+  hidden:    List any hidden file and delete it...
+  unsuffix:  Remove redundant suffixes like "copy" or "copia"
+  dezero:    Remove extra zeros (2 or more) from the start of a name
+  trim:      Remove spaces from the start and end of the file names
+  debracket: Remove [...] from names
+
+EOF
+}
+
+DRY=0
+RUN=1
+
+VERBOSE=echo
+
+SUFFIXES=('copy' 'copia')
+
+clean_db_files(){
+# Remove all the Thumbs.db and similar files
+# Argument:
+# 1: Path
+    ${VERBOSE} "Clean DB files"
+
+    if [ $DRY -eq $RUN ]
+    then
+        find "$1" -iname '*.db' -printf 'rm %p\n' -a -delete
+    else
+        find "$1" -iname '*.db' -printf 'rm %p\n'
+    fi
+}
+
+
+low_extension() {
+# Change upper to lower cases in the file extensions
+# Argument:
+# 1: Path
+    local ext
+    local name
+
+    ${VERBOSE} "Change extensions to lowercase"
+    for ext in JPG PNG
+    do
+        find "$1" -name "*.${ext}" | while read name
+        do
+            ${MV} "${name}" "${name/${ext}/${ext,,}}"
+        done
+    done
+}
+
+
+single_digit() {
+# Search files with a single digit name and add a 0 before
+# Argument:
+# 1: Path
+    local name
+
+    ${VERBOSE} "Add padding zeros to single digit names"
+
+    find "$1" -iname '[0-9]\.*' | while read name
+    do
+        ${MV} "${name}" "${name%/*}/0${name##*/}"
+    done
+
+    ${VERBOSE} "Add padding zeros to single digit double page names"
+    find "$1" -iname '[0-9][^0-9][0-9]\.*' | while read name
+    do
+        ${MV} "$name" "$(sed 's:/\([0-9][^0-9]\)\([0-9]\):/0\10\2:' <<<$name)"
+    done
+}
+
+
+double_digit() {
+# Search files with a double digit name and add a 0 before
+# Argument:
+# 1: Path
+    local name
+
+    ${VERBOSE} "Add padding zeros to double digit names"
+    find "$1" -iname '[0-9][0-9]\.*' | while read name
+    do
+        ${MV} "$name" "${name%/*}/0${name##*/}"
+    done
+    
+    ${VERBOSE} "Add padding zeros to double digit double page names"    
+    find "$1" -iname '[0-9][0-9][^0-9][0-9][0-9]\.*' | while read name
+    do
+        ${MV} "$name" "$(sed 's:/\([0-9][0-9][^0-9]\)\([0-9][0-9]\):/0\10\2:' <<<$name)"
+    done
+}
+
+
+unparentesis() {
+# Search files with the number inside () and remove the parentesis
+# Argument:
+# 1: Path
+    local name
+
+    ${VERBOSE} "Remove parentesis from names"
+    find "$1" -iname '*([0-9])*\.*' | while read name
+    do
+        ${MV} "$name" "$(sed 's/(\([0-9]\))/0\1/' <<<${name})"
+    done
+
+    find "$1" -iname '*([0-9][0-9])*\.*' | while read name
+    do
+        ${MV} "$name" "$(sed 's/(\([0-9][0-9]\))/\1/' <<<${name})"
+    done
+
+    find "$1" -iname '*([0-9][0-9][0-9])*\.*' | while read name
+    do
+        ${MV} "$name" "$(sed 's/(\([0-9][0-9][0-9]\))/\1/' <<<${name})"
+    done
+}
+
+
+fix_alphabet() {
+# Correct that weird alphabet-ordered directories... use with care!
+# Argument:
+# 1: Path
+    local letter
+    local number
+    local name
+    local d
+
+    ${VERBOSE} "Convert files numered with letters"
+    find "$1" -iname '[A-Za-z]\.*' | while read name
+    do
+        d=$(dirname "${name}")
+        letter=$(basename "$name")
+        number=$(printf '%d' \'$(tr '[[:lower:]]' '[[:upper:]]' <<<${letter::1}))
+        ${MV} "$name" "$d/$(printf %02d $((number-64)))${letter:1:${#letter}}"
+    done
+}
+
+
+kind_check() {
+# Check that the jpg and png files are what they say...
+# Argument:
+# 1: Path
+    local name
+
+    ${VERBOSE} "Change file extensions according to contents"
+
+    find "$1" -name "*.jpg" -o -name "*.jpeg" -o -name "*.png" | while read name
+    do
+        kind="$(file --mime-type --brief "${name}")"
+        
+        ext="${name##*\.}"
+        base="${name%\.${ext}}"
+        
+        case "${kind}"
+        in
+            "image/jpeg") good="jpg";;
+            "image/png") good="png";;
+            *) echo "Unknow type ${kind} [${name}]"; good="${ext}";;
+        esac
+
+        if [ "${ext}" != "${good}" ]
+        then
+            ${MV} "${name}" "${base}.${good}"
+        fi
+    done
+}
+
+
+clean_hidden() {
+# List any hidden file and delete it...
+# Argument:
+# 1: Path
+    ${VERBOSE} "Remove hidden files"
+
+    if [ $DRY -eq $RUN ]
+    then
+        find "$1" -iname '.[^.]*' -printf 'rm %p\n' -a -delete
+    else
+        find "$1" -iname '.[^.]*' -printf 'rm %p\n'
+    fi
+        
+
+}
+
+
+fix_chmod() {
+# Change the access rights of files and directories
+# Argument:
+# 1: Path
+    ${VERBOSE} "Fix file and directory access mode"
+    if [ $DRY -eq $RUN ]
+    then
+        # Fix first the directories to assure read access
+        find "$1" -type d -exec chmod 755 {} \;
+        find "$1" -type f -exec chmod 644 {} +
+    else
+        find "$1" -type f -not -perm 644 -or -type d -not -perm 755
+    fi
+}
+
+
+unsuffix() {
+# Remove extra suffixes from the files like " copy" " copia"...
+# Argument:
+# 1: Path
+    local name
+    local suf
+    local exp
+    
+    ${VERBOSE} "Remove clumsy suffixes"
+    for suf in ${SUFFIXES[@]}
+    do
+        exp='s/\s*'${suf}'\s*//'
+        find "$1" -regex ".*\s*${suf}\s*\..*" | while read name
+        do
+            ${MV} "$name" "$(sed ${exp} <<<${name})"
+        done
+    done
+}
+
+
+dezero() {
+# Remove extra zeros (2 or more) from the start of a name
+# Argument:
+# 1: Path
+    ${VERBOSE} "Remove Extra Zeros from 4-digit names"
+    find "$1" -name '0[0-9][0-9][0-9]\.*' | while read name
+    do
+        ${MV} "$name" "$(sed 's/0\([0-9][0-9][0-9]\)/\1/' <<<${name})"
+    done
+    ${VERBOSE} "Remove Extra Zeros from double 4-digit names"
+    find "$1" -name '0[0-9][0-9][0-9]?0[0-9][0-9][0-9]\.*' | while read name
+    do
+        ${MV} "$name" "$(sed 's/0\([0-9][0-9][0-9].\)0\([0-9][0-9][0-9]\)/\1\2/' <<<${name})"
+    done
+}
+
+
+trim_names() {
+# Remove any spaces around the file names
+# Argument:
+# 1: Path
+    ${VERBOSE} "Trimming file names"
+    local name
+    local folder
+    local base
+    local ext
+    local sp
+
+    # First the leading whitespaces
+    find "$1" -name "*[[:space:]]" | while read name
+    do
+        ${MV} "$name" "${name%%+([[:space:]])}"
+    done
+
+    # Now the leading and trailing namespaces in the name itself
+    find "$1" -name "[[:space:]]*" -o -name "*[[:space:]].*" | while read name
+    do
+        folder=$(dirname "$name")
+        ext="${name##*.}"
+        base=$(basename "$name" .$ext)
+        
+        # Remove leading
+        sp="${base%%[![:space:]]*}"
+        base="${base#${sp}}"
+        # And trailing
+        sp="${base##*[![:space:]]}"  # " Needed to solve (https://youtrack.jetbrains.com/issue/IDEA-256714)
+        base="${base%${sp}}"
+
+        ${MV} "$name" "${folder}/${base}.${ext}"
+    done
+}
+
+
+debracket() {
+# Remove [bla bla] from the names
+# Argument:
+# 1: Path
+    ${VERBOSE} "Remove Extra Zeros from 4-digit names"
+    find . -iname '*\[*\]*' | while read name
+    do
+        ${MV} "$name" "$(sed 's/\s*\[[^]]*\]\s*//' <<<${name})"
+    done
+}
+
+#
+################################################################################
+#
+
+TEMP=$(getopt -o Yfr:h --longoptions yes,force,root:,suffix:,help -n 'mclean' -- "$@")
+
+if [ $? != 0 ]
+then
+    echo "Terminating..." >&2
+    exit 1
+fi
+
+# Note the quotes around `$TEMP': they are essential!
+eval set -- "$TEMP"
+
+
+root="$(pwd)"
+MV="echo mv "
+safe="-n"
+while true
+do
+    case "$1"
+    in
+    '-Y' | '--yes')
+        DRY=$RUN
+    ;;
+    '-f' | '--force')
+        safe=""
+    ;;
+    '-r' | '--root')
+        root="$2"
+        shift 1
+    ;;
+    '-h' | '--help')
+        usage
+        exit 2
+    ;;
+    '--suffix')
+        SUFFIXES=( "$2" )
+        shift 1
+    ;;
+    --)
+        shift
+        break
+    ;;
+    *)
+        echo "Internal error!"
+        exit 1
+    ;;
+    esac
+    shift
+done
+
+if [ ${DRY} -eq $RUN ]
+then
+    MV="mv -v ${safe} "
+else
+    MV="echo mv "
+fi
+
+if [ "$1" == "all" ]
+then
+    actions=( "chmod" "db" "ext" "digit" "kind" "hidden" "trim" )
+else
+    actions=( "$@" )
+fi
+
+for ((i=0; i<${#actions[@]}; i++))
+do
+    case "${actions[$i]}" in
+    "chmod")
+        fix_chmod "${root}"
+    ;;
+    "db")
+        clean_db_files "${root}"
+    ;;
+    "ext")
+        low_extension "${root}"
+    ;;
+    "digit")
+        single_digit "${root}"
+    ;;
+    "double")
+        double_digit "${root}"
+    ;;
+    "unpar")
+        unparentesis "${root}"
+    ;;
+    "unalpha")
+        fix_alphabet "${root}"
+    ;;
+    "kind")
+        kind_check "${root}"
+    ;;
+    "hidden")
+        clean_hidden "${root}"
+    ;;
+    "unsuffix")
+        unsuffix "${root}"
+    ;;
+    "dezero")
+        dezero "${root}"
+    ;;
+    "trim")
+        trim_names "${root}"
+    ;;
+    "debracket")
+        debracket "${root}"
+    ;;
+    *)
+        echo "Unknown command: ${cmd}"
+        usage
+        exit 1
+    ;;
+    esac
+done

@@ -1,0 +1,710 @@
+#!/bin/bash
+
+# renumber
+#
+# Rename files that follow a numbering order, like the pages of a comic.
+#
+# This script allow to define a parser to detect the number from single and double pages,
+# identify wrongly numbered double pages and apply an offset to all the numbers.
+
+
+set -e
+
+NAME="$(basename "$0")"
+
+
+SHORT='Yhe:rs:S:d:j:J:t:T:nawi:f:'
+LONG='yes,help,ext:,reset,src:,second:,double:,join:,t_join:,tgt:,t_double:,no_double,auto,wrong,ini:,fin:'
+
+usage() {
+cat <<-EOF
+Renumber batch of files changing the numeration
+
+Usage:
+    ${NAME} [options] ini fin delta
+
+Change from ini to fin adding delta
+
+ini and fin can be replaced by 'auto' to try to determine the lower and upper values
+from the source pattern.
+
+delta can be =N so the ini element is transformed to N value.
+
+
+Options:
+    -i | --ini N
+        Initial page (default a == auto)
+
+    -f | --fin N
+        Final page (default a == auto)
+
+    -Y | --yes
+        Perform the changes, not just report them
+
+    -e | --ext EXT
+        Add the extension to the list of default extensions
+
+    -r | --reset
+        Clean the list of extensions
+
+    -n | --no_double
+        Do Not Consider double pages.
+
+    -s | --src PATTERN
+        Set the source file pattern (see printf) Default is "${SRC}"
+
+    -j | --join str
+        Join the source double page with this tring instead of the default (-)
+
+    -S | --second PATTERN
+        Set the pattern for the 2nd group of numbers in double pages. Default equal to single pattern.
+
+    -d | --double PATTERN
+        Set the source file pattern (see printf) for double pages instead the build one
+
+    -t | --tgt PATTERN
+        Set the target file pattern (see printf) Default is "${TGT}"
+
+    -J | --t_join str
+        Join the target double page with this tring instead of the default (-)
+
+    -T | --t_double PATTERN
+        Set the target file pattern (see printf) for double pages
+
+    -a | --auto
+        Replace %c by the chapter number in the patterns
+    
+    -w | --wrong
+        Do not apply the logic to increase the detected wrong double pages
+
+EOF
+}
+
+mk_double() {
+# Convert a pattern in a double-page pattern
+# $1 => Pattern
+# $2 => link
+# $3 => second group
+    local -a parts
+    local number
+    IFS='/' read -r -a parts < <(sed -r 's:(.*)%(0*)([0-9]*)d(.*):\1/\2/\3/\4:' <<<"$1")
+    # Rebuild the pattern for numbers
+    number="%${parts[1]}${parts[2]}d"
+    local nxt="${3:-${number}}"
+    echo "${parts[0]}${number}$2${nxt}${parts[3]}"
+}
+
+
+orientation() {
+# Calculate image orientation
+# $1 ==> Image
+    local -a size
+
+    size=( $(magick identify -format '%w %h' "$1") )
+
+    if [ ${size[0]} -gt ${size[1]} ]
+    then
+        echo "landscape"
+    else
+        echo "portrait"
+    fi
+}
+
+
+single_candidates() {
+# Parse the single page pattern and select all the candidates
+    local parts
+    IFS='/' read -r -a parts < <(
+        sed -r 's:(.*)%(0*)([0-9]*)d(.*):\1/\2/\3/\4:' <<<"${SRC}"
+    )
+    # Parts:
+    local prefix="${parts[0]}"
+    local z="${parts[1]}"
+    local w="${parts[2]}"
+    local suffix="${parts[3]}"
+
+    local pattern
+    if [ -z "$w" ]
+    then
+        # No number...
+        if [ "$z" == "0" ]
+        then
+            # printf xxx_%0d 11 ==> xxx_
+            echo "Error: Any %0d pattern will produce no output"
+            exit 10
+        fi
+        # Case %d
+        pattern='[0-9]+'
+    elif [ "$z" == "0" ]
+    then
+        # Case %0nd
+        pattern="[0-9]{$w}"
+    else
+        # Case %nd
+        pattern="[0-9 ]{$((w-1))}[0-9]"
+    fi
+
+    local candidates=()
+    local ext
+    local delta
+    for ext in "${EXT[@]}"
+    do
+        delta=("${prefix}"*"${suffix}.${ext}")
+        # If no match [0] contains the glob
+        if [ ! -f "${delta[0]}" ]
+        then
+            continue
+        fi
+        candidates+=("${delta[@]%.${ext}}")
+    done
+
+    if [ ${#candidates[@]} -eq 0 ]
+    then
+        return
+    fi
+
+    if [ -n "${prefix}" ]
+    then
+        candidates=("${candidates[@]#"${prefix}"}")
+    fi
+
+    if [ -n "${suffix}" ]
+    then
+        candidates=("${candidates[@]%"${suffix}"}")
+    fi
+
+    local m v
+    for m in "${candidates[@]}"
+    do
+        if [[ "$m" =~ ^${pattern}$ ]]
+        then
+            v="$m"
+        else
+            continue
+        fi
+        # Convert to decimal number no matter the leading zeros
+        v=$((10#${v// }))
+        LOW=$(( (v < LOW) ? v : LOW))
+        UPP=$(( (UPP < v) ? v : UPP))
+    done
+}
+
+
+double_candidates() {
+# Parse the double page pattern and select all the candidates
+
+    # Get the pattern for the double pages
+    IFS='/' read -r -a parts < <(
+        sed -r 's:(.*)%(0*)([0-9]*)d([^%]*)%(0*)([0-9]*)d(.*):\1/\2/\3/\4/\5/\6/\7:' <<<"${DBL_SRC}"
+    )
+    local prefix="${parts[0]}"
+    local z1="${parts[1]}"
+    local w1="${parts[2]}"
+    local middle="${parts[3]}"
+    local z2="${parts[4]}"
+    local w2="${parts[5]}"
+    local suffix="${parts[6]}"
+
+    # If any of the patterns is variable and there is no gap, it is an error
+    if [ -z "${middle}" ] && ( [ -z "$w1" ] || [ -z "$w2" ] )
+    then
+        echo "Error: Invalid Double pattern (${DBL_SRC}) Get sure it has two %d elements"
+        exit 20
+    fi
+
+    local pattern
+    if [ -z "$w1" ]
+    then
+        # No fix number of digits...
+        if [ "$z1" == "0" ]
+        then
+            # printf xxx_%0d 11 ==> xxx_
+            echo "Error: Any %0d pattern will produce no output"
+            exit 10
+        fi
+        # Case %d
+        pattern='[0-9]+'
+    elif [ "$z1" == "0" ]
+    then
+        # Case %0nd
+        pattern="[0-9]{$w1}"
+    else
+        # Case %nd
+        pattern="[0-9 ]{$((w1-1))}[0-9]"
+    fi
+
+    if [ -z "$w2" ]
+    then
+        # No number...
+        if [ "$z2" == "0" ]
+        then
+            # printf xxx_%0d 11 ==> xxx_
+            echo "Error: Any %0d pattern will produce no output"
+            exit 10
+        fi
+        # Case %d
+        pattern="${pattern} [0-9]+"
+    elif [ "$z1" == "0" ]
+    then
+        # Case %0nd
+        pattern="${pattern} [0-9]{$w2}"
+    else
+        # Case %nd
+        pattern="${pattern} [0-9 ]{$((w2-1))}[0-9]"
+    fi
+
+    local candidates=()
+    local ext delta
+    for ext in "${EXT[@]}"
+    do
+        delta=("${prefix}"*"${middle}"*"${suffix}.${ext}")
+        # If no match [0] contains the glob
+        if [ ! -f "${delta[0]}" ]
+        then
+            continue
+        fi
+        candidates+=("${delta[@]%.${ext}}")
+    done
+
+    if [ ${#candidates[@]} -eq 0 ]
+    then
+        return
+    fi
+
+    if [ -n "${prefix}" ]
+    then
+        candidates=("${candidates[@]#"${prefix}"}")
+    fi
+
+    if [ -n "${suffix}" ]
+    then
+        candidates=("${candidates[@]%"${suffix}"}")
+    fi
+
+    if [ -n "${middle}" ]
+    then
+        candidates=("${candidates[@]/"${middle}"/ }")
+    fi
+
+    local m v w
+    for m in "${candidates[@]}"
+    do
+        if [[ "$m" =~ ^${pattern}$ ]]
+        then
+            v="${m% *}"
+            w="${m#* }"
+        else
+            continue
+        fi
+        # Convert to decimal number no matter the leading zeros
+        v=$((10#${v// }))
+        w=$((10#${w// }))
+        if ((w != v + 1))
+        then
+            echo "Invalid double page: $m => $(printf "${DBL_SRC}" $v $w)"
+            exit 200
+        fi
+        LOW=$(( (v < LOW) ? v : LOW))
+        UPP=$(( (UPP < w) ? v : UPP))
+    done
+}
+
+###############################################################################
+###
+### Parse the command line and start the main block
+###
+###############################################################################
+
+TEMP=$(getopt -o "${SHORT}0123456789" --longoptions "${LONG}" -n "${NAME}" -- "$@")
+if [ $? != 0 ]
+then
+    echo "Terminating..." >&2
+    exit 1
+fi
+
+# Note the quotes around `$TEMP': they are essential!
+eval set -- "$TEMP"
+
+
+DRY=echo
+EXT=( 'jpg' 'png' )
+SRC='%03d'
+NXT=
+DBL_SRC=
+TGT='%03d'
+DBL_TGT=
+declare -i accum=0
+DOUBLE='yes'
+JOIN='-'
+T_JOIN='-'
+AUTO='yes'
+CHAPTER='no'
+ini='a'
+fin='a'
+
+while true
+do
+    case "$1" in
+    -[0-9])
+        accum=$((accum*10 + $1))
+    ;;
+    '-i' | '--ini')
+        ini="$2"
+        shift
+    ;;
+    '-f' | '--fin')
+        fin="$2"
+        shift
+    ;;
+    '-Y' | '--yes')
+        DRY=$RUN
+    ;;
+    '-e' | '--ext')
+        EXT+=("$2")
+        shift
+    ;;
+    '-r' | '--reset')
+        EXT=()
+    ;;
+    '-s' | '--src')
+        SRC="$2"
+        shift
+    ;;
+    '-S' | '--second')
+        NXT="$2"
+        shift
+    ;;
+    '-d' | '--double')
+        DBL_SRC="$2"
+        shift
+    ;;
+    '-j' | '--join')
+        JOIN="$2"
+        shift
+    ;;
+    '-J' | '--t_join')
+        T_JOIN="$2"
+        shift
+    ;;
+    '-t' | '--tgt')
+        TGT="$2"
+        shift
+    ;;
+    '-T' | '--t_double')
+        DBL_TGT="$2"
+        shift
+    ;;
+    '-n' | '--no_double')
+        DOUBLE='no'
+    ;;
+    '-a' | '--auto')
+        CHAPTER='yes'
+    ;;
+    '-w' | '--wrong')
+        AUTO='no'
+    ;;
+    '-h' | '--help')
+        usage
+        exit 2
+    ;;
+    --)
+        shift
+        break
+    ;;
+    *)
+        echo "Internal error!"
+        exit 1
+    ;;
+    esac
+    shift
+done
+
+###############################################################################
+# Normal options processing here
+#
+case "$#" in
+0)
+    # If no arguments but accum is not 0 means the delta is given as -N
+    if [ ${accum} == 0 ]
+    then
+        echo "Not enough arguments"
+        usage
+        exit 2
+    fi
+    inc="${accum}"
+;;
+1)
+    if [ ${accum} -ne 0 ]
+    then
+        echo "Error: Two deltas in command line, abort"
+        exit 3
+    fi
+    inc="$1"
+;;
+*)
+    echo "Too many arguments: $@"
+    exit 20
+;;
+esac
+
+
+# Avoid problems in the pattern: do not accept patterns with /
+if  [ "${SRC#*/}" != "${SRC}" ] || [ "${NXT#*/}" != "${NXT}" ]
+then
+    echo "Do not use '/' in the pattern or the system gets confused"
+    exit 10
+fi
+
+# prepare the double patterns
+if [ "${DOUBLE}" == 'yes' ]
+then
+    if [ -z "${DBL_SRC}" ]
+    then
+        DBL_SRC="$(mk_double "${SRC}" "${JOIN}" "${NXT}")"
+        echo "Auto Input Double pattern '${DBL_SRC}'"
+    fi
+
+    if [ -z "${DBL_TGT}" ]
+    then
+        DBL_TGT="$(mk_double "${TGT}" "${T_JOIN}")"
+        echo "Auto Output Double pattern '${DBL_TGT}'"
+    fi
+fi
+
+
+# Replace %c with the chapter number
+if [ "${CHAPTER}" == 'yes' ]
+then
+    ch_num=$(realpath . | sed -r 's/.*[^0-9]([0-9]+)$/\1/')
+    echo "Detected chapter number ${ch_num}"
+    ch_dig=$((10#${ch_num}))
+    SRC="${SRC//%c/${ch_num}}"
+    DBL_SRC="${DBL_SRC//%c/${ch_num}}"
+    SRC="${SRC//%C/${ch_dig}}"
+    DBL_SRC="${DBL_SRC//%C/${ch_dig}}"
+fi
+
+
+if [ "${ini}" == "a" ] || [ "${fin}" == "a" ]
+then
+    LOW=$((2**63-1))
+    UPP=0
+    single_candidates
+    double_candidates
+
+
+    if [ ${LOW} -gt ${UPP} ]
+    then
+        echo "No valid candidates found"
+        exit 100
+    fi
+    
+    [ "${ini}" == 'a' ] && ini=${LOW}
+    [ "${fin}" == 'a' ] && fin=${UPP}
+
+    echo "Auto Range [${ini} --> ${fin}]"
+else
+    echo "User Range [${ini} --> ${fin}]"
+fi
+
+
+# Auto-delta? 
+if [[ "${inc}" =~ ^([0-9]*|[if])=([0-9]+)$ ]]
+then
+    ref="${BASH_REMATCH[1]}"
+    if [ -z "${ref}" ] || [ "${ref}" == 'i' ]
+    then
+        ref="${ini}"
+    elif [ "${ref}" == 'f' ]
+    then
+        ref="${fin}"
+    else
+        ref=$((10#$ref))
+    fi
+    val="$((10#${BASH_REMATCH[2]}))"
+    # Inc is really the value that ini shall have so
+    #  ini_out = ini + inc_real = inc ==> inc_real = inc - ini
+    inc=$((${val} - ${ref}))
+    echo "Auto Increment set to ${inc} so ${ref} ==> $((ref + inc))"
+elif [[ "${inc}" =~ ^[+-]?[0-9]+$ ]]
+then
+    inc="$((10#$inc))"
+    echo "Apply increment of $(printf %+d "${inc}")"
+else
+    echo "Invalid increment: ${inc}"
+    exit 100
+fi
+
+
+# Avoid overwriting:
+# The safe cases are:
+#  - inc > 0 and counting from high to low (so 10 -> 11, 9->10 ...)
+#  - inc < 0 and counting from low to high (so 9->8, 10->9 ...)
+# Otherwise invert the borders
+if [ "$((inc * (fin - ini)))" -gt 0 ]
+then
+    tmp="${ini}"
+    ini="${fin}"
+    fin="${tmp}"
+fi
+
+if [ "${ini}" -gt "${fin}" ]
+then
+    delta='-1'
+else
+    delta='1'
+fi
+
+
+# We want the loop inclusive
+declare -A wrong
+declare -A exist
+t0=$((2**63-1))
+tf=0
+for ((k=ini; k!=fin+delta; k+=delta))
+do
+    t=$((k+inc))
+    for ext in "${EXT[@]}"
+    do
+        # Try first with a single page
+        origin="$(printf "${SRC}" $k).${ext}"
+        target="$(printf "${TGT}" $t).${ext}"
+        if [ -f "${origin}" ]
+        then
+            ori="$(orientation "${origin}")"
+            if [ "${origin}" != "${target}" ]
+            then
+                ${DRY} mv -i "${origin}" "${target}"
+            fi
+            if [ "${ori}" == "landscape" ]
+            then
+                echo "Possible double page: ${origin} <=> ${target}"
+                wrong[$t]='y'
+            fi
+            # Keep track of the transformed range
+            t0=$(( t < t0 ? t : t0))
+            tf=$(( tf < t ? t : tf))
+            exist["${target}"]='y'
+        fi
+
+        [ "${DOUBLE}" != 'yes' ] && continue
+
+        # Look also for double pages
+        origin="$(printf "${DBL_SRC}" $k $((k+1))).${ext}"
+        target="$(printf "${DBL_TGT}" $t $((t+1))).${ext}"
+        if [ -f "${origin}" ]
+        then
+            ori="$(orientation "${origin}")"
+            if [ "${origin}" != "${target}" ]
+            then
+                ${DRY} mv -i "${origin}" "${target}"
+            fi
+            if [ "${ori}" == "portrait" ]
+            then
+                echo "Possible single page: ${origin} <=> ${target}"
+            fi
+            # Do not advance k, maybe the single page 'k+1' also exist
+            # Keep track of the transformed range
+            t0=$(( t < t0 ? t : t0))
+            tf=$(( tf < t ? t : tf))
+            exist["${target}"]='y'
+        fi
+    done
+done
+
+knd='s'
+for ext in "${EXT[@]}"
+do
+    target="$(printf "${DBL_TGT}" ${tf} $((tf+1))).${ext}"
+    if [ "${exist["${target}"]}" == 'y' ]
+    then
+        knd='d'
+    fi
+done
+
+
+if [ ${knd} == 's' ]
+then
+    echo "Transformed output $t0 --> $tf"
+else
+    echo "Transformed output $t0 --> $tf-$((tf+1))"
+fi
+
+if [ "${AUTO}" != 'yes' ]
+then
+    exit 0
+else
+    echo ""
+    echo "Auto wrong double page numeration"
+fi
+
+# Create the offset map
+declare -A offset
+
+d=0
+for ((t=t0; t<=tf; t++))
+do
+    offset[$t]=$d
+    [ "${wrong[$t]}" == 'y' ] && ((d+=1))
+done
+
+if [ $d == 0 ]
+then
+    echo "No wrong double pages found"
+    exit 0
+fi
+
+for ((t=tf; t>=t0; t--))
+do
+    k=$((t + offset[$t]))
+    if [ "${wrong[$t]}" == 'y' ]
+    then
+        for ext in "${EXT[@]}"
+        do
+            f="$(printf "${TGT}" $t).${ext}"
+            g="$(printf "${DBL_TGT}" $k $((k+1))).${ext}"
+            if [ "${exist[$f]}" == 'y' ]
+            then
+                ${DRY} mv -i "$f" "$g"
+            fi
+        done
+    elif [ "$k" == "$t" ]
+    then
+        [ -z "${DRY}" ] && continue
+        for ext in "${EXT[@]}"
+        do
+            f="$(printf "${TGT}" $t).${ext}"
+            [ "${exist[$f]}" == 'y' ] && echo "$f ==> correct"
+            f="$(printf "${DBL_TGT}" $t $((t+1))).${ext}"
+            [ "${exist[$f]}" == 'y' ] && echo "$f ==> correct"
+        done
+        continue
+    else
+        for ext in "${EXT[@]}"
+        do
+            f="$(printf "${TGT}" $t).${ext}"
+            g="$(printf "${TGT}" $k).${ext}"
+            if [ "${exist[$f]}" == 'y' ]
+            then
+                ${DRY} mv -i "$f" "$g"
+            fi
+
+            f="$(printf "${DBL_TGT}" $t $((t+1))).${ext}"
+            g="$(printf "${DBL_TGT}" $k $((k+1))).${ext}"
+            if [ "${exist[$f]}" == 'y' ]
+            then
+                ${DRY} mv -i "$f" "$g"
+            fi
+        done
+    fi
+done
+
+echo ""
+
+f="$(printf "${DBL_TGT}" ${tf} $((tf+1))).${ext}"
+if [ "${exist[$f]}" == 'y' ]
+then
+    echo "Final output range: $t0 --> $((tf+d))-$((tf+d+1))"
+else
+    echo "Final output range: $t0 --> $((tf+d))"
+fi

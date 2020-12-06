@@ -1,0 +1,149 @@
+#!/bin/bash
+
+# Usage:
+# splitter pdf [target dir]
+
+set -e
+
+if [ "$1" == '-h' ] || [ "$1" == '--help' ]
+then
+    echo "Usage:"
+    echo "$(basename "$0") [-c] PDF [OUTDIR]"
+    echo ""
+    echo "OUTDIR default value is pdf name without extension"
+    exit 0
+fi
+
+ch=0
+if [ "${1::2}" == '-c' ]
+then
+    DUP_MODE=2
+    if [ "${#1}" -gt 2 ]
+    then
+        ch=${1:2}
+    else
+        ch=1
+    fi
+    shift
+else
+    DUP_MODE=1
+fi
+
+
+pdf="$1"
+
+if [ ! -f "$pdf" ]
+then
+    echo "Cannot read pdf file: ${pdf}"
+    exit 1
+fi
+
+
+# Create the output directory
+out="$2"
+if [ -z "${out}" ]
+then
+    out="$(basename "${pdf}" '.pdf')"
+fi
+
+mkdir -p "${out}"
+if [ ! -d "${out}" ]
+then
+    echo "Cannot create output directory ${out}"
+    exit 2
+fi
+
+# Generate first the outline
+pdftohtml -q -i -nodrm -xml -c "${pdf}" "${out}/outline"
+
+outline="${out}/outline.xml"
+declare -A table
+declare -a order
+
+dup_names=0
+while read line
+do
+    page=${line%=*}
+    name=${line#*=}
+    order+=(${page})
+    table[${page}]="${name}"
+
+    # If we know already that they are duplicate dnames, do not search for it again
+    if [ ${dup_names} != 0 ]
+    then
+        continue
+    fi
+
+    for pg in ${!table[@]}
+    do
+        if [ "${pg}" == "${page}" ]
+        then
+            continue
+        fi
+
+        if [ "${table[${pg}]}" == "${name}" ]
+        then
+            echo "Found at least one duplicated name"
+            echo "File names will be prefixed with page"
+            dup_names=${DUP_MODE}
+            break
+        fi
+    done
+done < <(sed -n '/item/s/.*="\([^"]*\)">\([^<]*\)<.*/\1=\2/p' "${outline}")
+
+rm "${outline}"
+
+
+if [ ${#order} -eq 0 ]
+then
+    # No pge names, no need to add the page number to the result
+    pn=
+else
+    pn='-p'
+fi
+# Now create the images
+pdfimages -q -all ${pn} "${pdf}" "${out}/img"
+
+# Finally rename them... is easier to go inside the target dir
+last='0'
+
+
+cd "${out}"
+for page in "${order[@]}"
+do
+    pg=$(printf %03d ${page})
+    img=(img-${pg}-*)
+    if [ ${#img[@]} -ne 1 ] || [ ! -f "${img[0]}" ]
+    then
+        echo "Unexpected format, expand manually"
+        exit 1
+    fi
+    # Ignore the name extension if any and use the generated one
+    ext="${img[0]#*.}"
+    tgt="${table[$page]}"
+    # Detect only png, jpg that are the most common
+    tgt="${tgt%.jpg}"
+    tgt="${tgt%.png}"
+    
+    case "${dup_names}"
+    in
+    0) tgt="${tgt}.${ext}";;
+    1) tgt="${pg}-${tgt}.${ext}";;
+    2)
+        # Advance mode, detect chapter transitions.
+        if [ $((10#${last} - 10#${tgt})) -ge 0 ]
+        then
+            ((ch+=1))
+        fi
+        echo "LAST=${last} CH: ${ch} TGT: ${tgt}"
+        last="${tgt}"
+        d="c$(printf '%03d' ${ch})"
+        mkdir -p "$d"
+        tgt="$d/${tgt}.${ext}"
+    ;;
+    *) echo "Internal error"; exit 10;;
+    esac
+
+    mv -i "${img}" "${tgt}"
+done
+
