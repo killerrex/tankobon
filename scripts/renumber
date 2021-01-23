@@ -80,6 +80,7 @@ Options:
 EOF
 }
 
+
 mk_double() {
 # Convert a pattern in a double-page pattern
 # $1 => Pattern
@@ -117,11 +118,11 @@ single_candidates() {
     IFS='/' read -r -a parts < <(
         sed -r 's:(.*)%(0*)([0-9]*)d(.*):\1/\2/\3/\4:' <<<"${SRC}"
     )
-    # Parts:
-    local prefix="${parts[0]}"
+    # Parts (replacing %% by % as no printf is used):
+    local prefix="${parts[0]//%%/%}"
     local z="${parts[1]}"
     local w="${parts[2]}"
-    local suffix="${parts[3]}"
+    local suffix="${parts[3]//%%/%}"
 
     local pattern
     if [ -z "$w" ]
@@ -197,13 +198,14 @@ double_candidates() {
     IFS='/' read -r -a parts < <(
         sed -r 's:(.*)%(0*)([0-9]*)d([^%]*)%(0*)([0-9]*)d(.*):\1/\2/\3/\4/\5/\6/\7:' <<<"${DBL_SRC}"
     )
-    local prefix="${parts[0]}"
+    # Replace any %% by % as we are not using printf here
+    local prefix="${parts[0]//%%/%}"
     local z1="${parts[1]}"
     local w1="${parts[2]}"
-    local middle="${parts[3]}"
+    local middle="${parts[3]//%%/%}"
     local z2="${parts[4]}"
     local w2="${parts[5]}"
-    local suffix="${parts[6]}"
+    local suffix="${parts[6]//%%/%}"
 
     # If any of the patterns is variable and there is no gap, it is an error
     if [ -z "${middle}" ] && ( [ -z "$w1" ] || [ -z "$w2" ] )
@@ -349,11 +351,11 @@ do
         accum=$((accum*10 + $1))
     ;;
     '-i' | '--ini')
-        ini="$2"
+        ini=$((10#$2))
         shift
     ;;
     '-f' | '--fin')
-        fin="$2"
+        fin=$((10#$2))
         shift
     ;;
     '-Y' | '--yes')
@@ -461,13 +463,11 @@ then
     if [ -z "${DBL_SRC}" ]
     then
         DBL_SRC="$(mk_double "${SRC}" "${JOIN}" "${NXT}")"
-        echo "Auto Input Double pattern '${DBL_SRC}'"
     fi
 
     if [ -z "${DBL_TGT}" ]
     then
         DBL_TGT="$(mk_double "${TGT}" "${T_JOIN}")"
-        echo "Auto Output Double pattern '${DBL_TGT}'"
     fi
 fi
 
@@ -476,13 +476,17 @@ fi
 if [ "${CHAPTER}" == 'yes' ]
 then
     ch_num=$(realpath . | sed -r 's/.*[^0-9]([0-9]+)$/\1/')
-    echo "Detected chapter number ${ch_num}"
     ch_dig=$((10#${ch_num}))
+    echo "Detected chapter number %c=${ch_num} %C=${ch_dig}"
     SRC="${SRC//%c/${ch_num}}"
     DBL_SRC="${DBL_SRC//%c/${ch_num}}"
     SRC="${SRC//%C/${ch_dig}}"
     DBL_SRC="${DBL_SRC//%C/${ch_dig}}"
 fi
+
+echo "Read patterns:"
+echo "  Single: ${SRC}"
+echo "  Double: ${DBL_SRC}"
 
 
 if [ "${ini}" == "a" ] || [ "${fin}" == "a" ]
@@ -526,9 +530,10 @@ then
     #  ini_out = ini + inc_real = inc ==> inc_real = inc - ini
     inc=$((${val} - ${ref}))
     echo "Auto Increment set to ${inc} so ${ref} ==> $((ref + inc))"
-elif [[ "${inc}" =~ ^[+-]?[0-9]+$ ]]
+elif [[ "${inc}" =~ ^([+-])?([0-9]+)$ ]]
 then
-    inc="$((10#$inc))"
+    # Avoid problems when the user types +09 as increment
+    inc="$((${BASH_REMATCH[1]}1 * 10#${BASH_REMATCH[2]}))"
     echo "Apply increment of $(printf %+d "${inc}")"
 else
     echo "Invalid increment: ${inc}"
@@ -567,8 +572,8 @@ do
     for ext in "${EXT[@]}"
     do
         # Try first with a single page
-        origin="$(printf "${SRC}" $k).${ext}"
-        target="$(printf "${TGT}" $t).${ext}"
+        printf -v origin "${SRC}.${ext}" $k
+        printf -v target "${TGT}.${ext}" $t
         if [ -f "${origin}" ]
         then
             ori="$(orientation "${origin}")"
@@ -590,8 +595,8 @@ do
         [ "${DOUBLE}" != 'yes' ] && continue
 
         # Look also for double pages
-        origin="$(printf "${DBL_SRC}" $k $((k+1))).${ext}"
-        target="$(printf "${DBL_TGT}" $t $((t+1))).${ext}"
+        printf -v origin "${DBL_SRC}.${ext}" $k $((k+1))
+        printf -v target "${DBL_TGT}.${ext}" $t $((t+1))
         if [ -f "${origin}" ]
         then
             ori="$(orientation "${origin}")"
@@ -615,7 +620,7 @@ done
 knd='s'
 for ext in "${EXT[@]}"
 do
-    target="$(printf "${DBL_TGT}" ${tf} $((tf+1))).${ext}"
+    printf -v target "${DBL_TGT}.${ext}" ${tf} $((tf+1))
     if [ "${exist["${target}"]}" == 'y' ]
     then
         knd='d'
@@ -661,8 +666,8 @@ do
     then
         for ext in "${EXT[@]}"
         do
-            f="$(printf "${TGT}" $t).${ext}"
-            g="$(printf "${DBL_TGT}" $k $((k+1))).${ext}"
+            printf -v f "${TGT}.${ext}" $t
+            printf -v g "${DBL_TGT}.${ext}" $k $((k+1))
             if [ "${exist[$f]}" == 'y' ]
             then
                 ${DRY} mv -i "$f" "$g"
@@ -673,24 +678,24 @@ do
         [ -z "${DRY}" ] && continue
         for ext in "${EXT[@]}"
         do
-            f="$(printf "${TGT}" $t).${ext}"
+            printf -v f "${TGT}.${ext}" $t
             [ "${exist[$f]}" == 'y' ] && echo "$f ==> correct"
-            f="$(printf "${DBL_TGT}" $t $((t+1))).${ext}"
+            printf -v f "${DBL_TGT}.${ext}" $t $((t+1))
             [ "${exist[$f]}" == 'y' ] && echo "$f ==> correct"
         done
         continue
     else
         for ext in "${EXT[@]}"
         do
-            f="$(printf "${TGT}" $t).${ext}"
-            g="$(printf "${TGT}" $k).${ext}"
+            printf -v f "${TGT}.${ext}" $t
+            printf -v g "${TGT}.${ext}" $k
             if [ "${exist[$f]}" == 'y' ]
             then
                 ${DRY} mv -i "$f" "$g"
             fi
 
-            f="$(printf "${DBL_TGT}" $t $((t+1))).${ext}"
-            g="$(printf "${DBL_TGT}" $k $((k+1))).${ext}"
+            printf -v f "${DBL_TGT}.${ext}" $t $((t+1))
+            printf -v g "${DBL_TGT}.${ext}" $k $((k+1))
             if [ "${exist[$f]}" == 'y' ]
             then
                 ${DRY} mv -i "$f" "$g"
@@ -701,7 +706,7 @@ done
 
 echo ""
 
-f="$(printf "${DBL_TGT}" ${tf} $((tf+1))).${ext}"
+printf -v f "${DBL_TGT}.${ext}" ${tf} $((tf+1))
 if [ "${exist[$f]}" == 'y' ]
 then
     echo "Final output range: $t0 --> $((tf+d))-$((tf+d+1))"
