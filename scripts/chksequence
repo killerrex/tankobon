@@ -5,103 +5,171 @@
 #
 set -e
 
+if [ $# -eq 0 ]
+then
+    cat <<-EOF
+    Check numeric sequence of the pages in a folder and all the sub-folders
+
+    Usage:
+        $(basename "$0") FolderA [FolderB...]
+
+    Each Folder is checked independently.
+EOF
+    exit 0
+fi
+
+OK='\e[32m'
+KO='\e[31m'
+WR='\e[33m'
+DF='\e[0m'
+
+#
+# Look for pages with names not following:
+#  nnn or nnn or nnn-nnn or nnn-nnn
+#  000_Cover_vnn or 000l
+wrong_naming() {
+
+    local folder="$1"
+    local -a pages
+    # Look for miss-numbered pages
+    readarray -t pages < <(find "${folder}" -type f -not \( \
+        -name "[0-9][0-9][0-9].[jp][pn]g" -o \
+        -name "[0-9][0-9][0-9]-[0-9][0-9][0-9].[jp][pn]g" -o \
+        -name "000_Cover_v[0-9][0-9].[jp][pn]g" -o \
+        -name "000[a-z].[jp][pn]g" \
+        \) | sort)
+
+    if [ ${#pages[@]} -ne 0 ]
+    then
+        echo -e "${WR}"
+        echo "Pages not following NNN.ext or NNN-NNN.ext:"
+        local p
+        for p in "${pages[@]}"
+        do
+            echo "  $p"
+        done
+        echo -e "${DF}"
+    fi
+}
+
+#
+# Check that the pages follows a sequence and report the gaps
+verify_folder() {
+
+    local folder="$1"
+    echo ""
+    echo -e "Sequence:${KO}"
+
+    local -a pages
+    readarray -d '' pages < <(find "$f" \( \
+        -name "[0-9][0-9][0-9].[jp][pn]g" -o \
+        -name "[0-9][0-9][0-9]-[0-9][0-9][0-9].[jp][pn]g" \) -printf '%f\0' | sort -z
+    )
+
+    # Remove extensions to keep only the raw number nnn
+    pages=("${pages[@]/.png}")
+    pages=("${pages[@]/.jpg}")
+
+    # First approximation of the maximum value of n
+    local -i max="${#pages[@]}"
+
+    # Get the first n of the first page and correct the maximum value
+    local -i n=$((10#${pages[0]:0:3}))
+    max+=n-1
+
+    # c=''
+    local -i low=$n
+
+    # Number of failed pages
+    local -i failed=0
+
+    local -i a
+    local -i b
+    local p
+    # n always contains the value of the next page to find
+    for p in "${pages[@]}"
+    do
+        # p can be NNN or NNN-NNN, get the numeric values
+        a=$((10#${p:0:3}))
+
+        # There are two scenarios were a < n:
+        # ... 040 041-042 042 043 ...
+        # ... 042 042-043 044 ...
+        # Here 42 is duplicated,
+        if [ $a -lt $n ]
+        then
+            failed+=1
+            echo "  Duplicated page: $p"
+            continue
+        fi
+
+        # report all the missing pages since the last one found
+        while [ $n -lt $a ] && [ $n -le ${max} ]
+        do
+            echo "  Missing page $n"
+            failed+=1
+            n+=1
+        done
+
+        # Look now for the next page
+        n+=1
+
+        if [ ${#p} -gt 3 ]
+        then
+            # This is a double page, check if it is valid
+            b=$((10#${p:4:3}))
+            max+=1
+            if [ $b -ne $n ]
+            then
+                # This is an invalid double page: skip it
+                echo "  Invalid double page: $p"
+                failed+=1
+                continue
+            fi
+            # Advance also the double page
+            n+=1
+        fi
+    done
+
+    if [ ${failed} -eq 0 ]
+    then
+        echo -e "${OK}All seems ok [$low --> $((n-1))]"
+        STATE='OK'
+    else
+        STATE='KO'
+    fi
+    echo -e "${DF}"
+}
+
+
+#
+# The main loop
+declare -A summary
 for f in "$@"
 do
     if [ ! -d "$f" ]
     then
         continue
     fi
-
     echo ""
     echo "Looking in $f"
-    
-    # Look for miss-numbered pages
-    readarray -d '' pages < <(find "$f" -type f -not \( \
-        -name "[0-9][0-9][0-9].[jp][pn]g" -o \
-        -name "[0-9][0-9][0-9]-[0-9][0-9][0-9].[jp][pn]g" -o \
-        -name "000_Cover_v[0-9][0-9].[jp][pn]g" -o \
-        -name "000[a-z].[jp][pn]g" \
-        \) | sort)
-    
-    if [ ${#pages[@]} -ne 0 ]
-    then
-        echo ""
-        echo "Pages not following NNN.ext or NNN-NNN.ext:"
-        for p in "${pages[@]}"
-        do
-            echo "  $p"
-        done
-    fi
-    
-    echo ""
-    echo "Sequence:"
-    readarray -d '' pages < <(find "$f" \( -name "[0-9][0-9][0-9].[jp][pn]g" -o -name "[0-9][0-9][0-9]-[0-9][0-9][0-9].[jp][pn]g" \) -printf '%f\0' | sort -z)
-    
-    pages=("${pages[@]/.png}")
-    pages=("${pages[@]/.jpg}")
 
-    max="${#pages[@]}"
-
-    c=''
-    d="${pages[0]:0:3}"
-    # Correct the max Value:
-    max=$((max + d - 1))
-    n=$((10#$d))
-    low=$n
-    k=0
-    ok=0
-    while [ $k -lt ${#pages[@]} ] && [ $n -le ${max} ]
-    do
-        # Select the next valid page
-        p=${pages[$k]}
-    
-        if [ "${p/-}" != "$p" ]
-        then
-            # This is a double page
-            ((max+=1))
-            if [ $((10#${p:4:3} - 10#${p:0:3})) -ne 1 ]
-            then
-                # This is an invalid double page: skip it
-                echo "  Invalid double page: $p"
-                ((k+=1))
-                ((ok+=1))
-                continue
-            fi
-        fi
-
-        b=$c
-        c=$d
-        # In any case we will check the next number
-        ((n+=1))
-        d="$(printf %03d $n)"
-
-        if [ "$p" == "$c" ]
-        then
-            ((k+=1))
-        elif [ "$p" == "$c-$d" ]
-        then
-            ((n+=1))
-            d="$(printf %03d $n)"
-            ((k+=1))
-        elif [ "$p" == "$b-$c" ]
-        then
-            echo "  Duplicated double page number: $b-$c"
-            ((ok+=1))
-            ((k+=1))
-        else
-            echo "  Missing page $((n-1))"
-            ((ok+=1))
-        fi
-    done
-    if [ ${ok} -eq 0 ]
-    then
-        echo "All seems ok [$low --> $((n-1))]"
-    fi
-    echo ""
+    wrong_naming "$f"
+    verify_folder "$f"
+    summary[$f]=${STATE}
 done
 
-
-    
-
-
-
+if [ ${#summary[@]} -gt 1 ]
+then
+    echo "Summary:"
+    for f in "$@"
+    do
+        case "${summary[$f]}"
+        in
+        'OK') c="${OK}OK${DF}";;
+        'KO') c="${KO}KO${DF}";;
+        *) continue;;
+        esac
+        echo -e "  $c $f"
+    done
+fi
