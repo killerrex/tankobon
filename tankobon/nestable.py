@@ -66,13 +66,12 @@ class Base:
     Attributes:
         _name: Original name of the Element
         _number: Associated number in the collection.
-        _virtual: True if this element shall not produce a transform
         _hoaxes: List of numbers present in this level name not related
                  with the real number
         _glob: Pattern to select folders for the sub-levels
     """
 
-    def __init__(self, name: str):
+    def __init__(self, name: str, pattern='*'):
         """
         Create a base object.
 
@@ -82,9 +81,8 @@ class Base:
         super().__init__()
         self._name = name
         self._number = None
-        self._virtual = False
         self._hoaxes = []
-        self._glob = '*'
+        self._glob = pattern
 
     def path(self) -> Path:
         """
@@ -93,7 +91,7 @@ class Base:
         Returns:
             Base implementation uses the element name as path.
         """
-        return Path(self._name)
+        raise NotImplementedError
 
     def _listdir(self):
         """
@@ -337,13 +335,17 @@ class Node(Base):
         # Isolate all the numbers from the name
         numbers = UNumber.extract_numbers(self._name, self._option.roman)
 
-        number = None
-        if len(numbers) > 0:
-            # Remove any spurious value
-            numbers = self._rm_spurious(numbers)
-            # Finally decide from the expected values
-            number, hoax = self._guess(expected, numbers)
-            self._hoaxes.extend(hoax)
+        if expected is None:
+            # This is a non-numbered item, but with a number in the name...
+            self._hoaxes.extend(numbers)
+            self._number = None
+            return
+
+        # Remove any spurious value
+        numbers = self._rm_spurious(numbers)
+        # Finally decide from the expected values
+        number, hoax = self._guess(expected, numbers)
+        self._hoaxes.extend(hoax)
 
         if number is None:
             # This is an bonus number, use the 'bonus' label
@@ -424,10 +426,7 @@ class Node(Base):
         Returns:
             The nested path to this element
         """
-        if self._parent is None or self._parent._virtual:
-            return Path(self._name)
-        else:
-            return self._parent.path() / self._name
+        return self._parent.path() / self._name
 
     def wide(self, level=0):
         """
@@ -697,52 +696,46 @@ class Series(Base):
         Args:
             opts: Options for the whole collection.
         """
-        super().__init__(str(opts.root))
-
-        if opts.single:
-            self._virtual = True
+        super().__init__(opts.root.name, pattern=opts.glob)
+        self.origin = opts.root.parent
+        self._virtual = opts.single
 
         self._nodes = []
         self._wides = [0, 0, 0]
-        # Search for a number in the title...
+        # Search for a number in the old title...
         self._hoaxes = UNumber.extract_numbers(self._name, False)
         # Add any user defined hoax
         self._hoaxes.extend(opts.hoax)
         # Finally launch the recursive process
         self._populate(opts)
 
-    def _populate(self, opts: Options):
+    def path(self) -> Path:
+        if self._virtual:
+            return self.origin
+        else:
+            return self.origin / self._name
+
+    def _populate(self, opts):
+        if self._virtual:
+            self._populate_single(opts)
+        else:
+            self._populate_multi(opts)
+
+    def _populate_multi(self, opts: Options):
         """
         Scan the directory
 
         Args:
             opts: The program options
         """
-        if opts.glob:
-            self._glob = opts.glob
-
-        if opts.single:
-            # The target is just a single book
-            nodes = [str(self.path())]
-            expected = []
-            v_wide = 2
-            # As a single book, no bonus or extra for volume level
-            opts.volume.bonus = None
-            opts.volume.special = None
-        else:
-            nodes = self._listdir()
-            expected = [opts.volume.first + x for x in range(len(nodes))]
-            # Biggest expected value give the volume optimum width
-            # but use always at least 2 chars
-            v_wide = max(2, len(str(expected[-1])))
-
-        self._wides[1] = v_wide
+        nodes = self._listdir()
+        expected = [opts.volume.first + x for x in range(len(nodes))]
+        # Biggest expected value give the volume optimum width
+        # but use always at least 2 chars
+        self._wides[1] = max(2, len(str(expected[-1])))
 
         children = [Volume(self, v, expected, opts.volume) for v in nodes]
-        if len(children) != len(nodes):
-            # Some Volume missing, report
-            _logger.error('Missing Volumes {}'.format(expected))
-
+        # Reorder as the final numeric order might be different to the alphabetical order
         children.sort()
 
         # Do not search for chapters in flat mode
@@ -764,9 +757,42 @@ class Series(Base):
             # Get the best wide
             ch_wide = max(ch_wide, len(str(vol.last())))
 
+        if len(self._nodes) != len(children):
+            # Some Volume missing, report
+            _logger.error('Missing Volumes {}'.format(expected))
+
         # This last element gives us the optimum wide for chapters
         # but use always at least 2 chars
         self._wides[2] = max(2, ch_wide)
+
+    def _populate_single(self, opts: Options):
+        """
+        Scan the directory for a single book
+
+        Args:
+            opts: The program options
+        """
+        # Not really used as at volume level there is no number to write
+        self._wides[1] = 2
+        # As a single book, no bonus or extra for volume level
+        opts.volume.bonus = None
+        opts.volume.special = None
+        vol = Volume(self, self._name, None, opts.volume)
+        self._nodes = [vol]
+
+        # Do not search for chapters in flat mode... this si a little bit silly in single mode
+        if opts.volume.flat:
+            return
+
+        # Now sub-populate
+        try:
+            vol.populate(None, opts.chapter)
+        except ValueError as err:
+            _logger.info("Ignore: %s: %s", str(vol), str(err))
+
+        # This last element gives us the optimum wide for chapters
+        # but use always at least 2 chars
+        self._wides[2] = max(2, len(str(vol.last())))
 
     def wide(self, level=0):
         """
