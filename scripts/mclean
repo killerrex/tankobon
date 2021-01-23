@@ -30,6 +30,10 @@ Work Modes:
   dezero:    Remove extra zeros (2 or more) from the start of a name
   trim:      Remove spaces from the start and end of the file names
   debracket: Remove [...] from names
+  unjpe:     Transform jpe files in jpg
+
+As special work mode, it can report the likelihood of each file to be Black & White
+  bw[=THR]:  Report color images with likelihood to be black/white lower than THR(default=90%)
 
 EOF
 }
@@ -64,12 +68,24 @@ low_extension() {
     local name
 
     ${VERBOSE} "Change extensions to lowercase"
-    for ext in JPG PNG
+    for ext in JPG PNG JPE
     do
         find "$1" -name "*.${ext}" | while read name
         do
-            ${MV} "${name}" "${name/${ext}/${ext,,}}"
+            ${MV} "${name}" "${name%.${ext}}.${ext,,}"
         done
+    done
+}
+
+
+unjpe() {
+# Rename JPE files in JPG using imagemagick
+    local name
+
+    ${VERBOSE} "Transform JPE to JPG"
+    find "$1" -name '*.jpe' | while read name
+    do
+        ${MV} "${name}" "${name%.jpe}.jpg"
     done
 }
 
@@ -106,8 +122,8 @@ double_digit() {
     do
         ${MV} "$name" "${name%/*}/0${name##*/}"
     done
-    
-    ${VERBOSE} "Add padding zeros to double digit double page names"    
+
+    ${VERBOSE} "Add padding zeros to double digit double page names"
     find "$1" -iname '[0-9][0-9][^0-9][0-9][0-9]\.*' | while read name
     do
         ${MV} "$name" "$(sed 's:/\([0-9][0-9][^0-9]\)\([0-9][0-9]\):/0\10\2:' <<<$name)"
@@ -170,10 +186,10 @@ kind_check() {
     find "$1" -name "*.jpg" -o -name "*.jpeg" -o -name "*.png" | while read name
     do
         kind="$(file --mime-type --brief "${name}")"
-        
+
         ext="${name##*\.}"
         base="${name%\.${ext}}"
-        
+
         case "${kind}"
         in
             "image/jpeg") good="jpg";;
@@ -201,8 +217,6 @@ clean_hidden() {
     else
         find "$1" -iname '.[^.]*' -printf 'rm %p\n'
     fi
-        
-
 }
 
 
@@ -229,7 +243,7 @@ unsuffix() {
     local name
     local suf
     local exp
-    
+
     ${VERBOSE} "Remove clumsy suffixes"
     for suf in ${SUFFIXES[@]}
     do
@@ -246,6 +260,7 @@ dezero() {
 # Remove extra zeros (2 or more) from the start of a name
 # Argument:
 # 1: Path
+    local name
     ${VERBOSE} "Remove Extra Zeros from 4-digit names"
     find "$1" -name '0[0-9][0-9][0-9]\.*' | while read name
     do
@@ -282,7 +297,7 @@ trim_names() {
         folder=$(dirname "$name")
         ext="${name##*.}"
         base=$(basename "$name" .$ext)
-        
+
         # Remove leading
         sp="${base%%[![:space:]]*}"
         base="${base#${sp}}"
@@ -299,6 +314,7 @@ debracket() {
 # Remove [bla bla] from the names
 # Argument:
 # 1: Path
+    local name
     ${VERBOSE} "Remove Extra Zeros from 4-digit names"
     find . -iname '*\[*\]*' | while read name
     do
@@ -306,11 +322,31 @@ debracket() {
     done
 }
 
+
+bw_likelihood() {
+# Probability of being grey
+# 1: Path
+    local name
+    local p
+
+    ${VERBOSE} "Report color images"
+
+    find "$1" -name "*.jpg" -o -name "*.jpeg" -o -name "*.png" | sort | while read name
+    do
+        p=$(magick convert "${name}" -colorspace HSL -channel g -separate +channel -format '%[fx:100*(1 - mean)]' info:)
+        p="${p%.*}"
+        if [ $p -lt ${BW_THRESHOLD} ]
+        then
+            printf '%03d%%: %s\n' ${p} "${name#${root}/}"
+        fi
+    done
+}
+
 #
 ################################################################################
 #
 
-TEMP=$(getopt -o Yfr:h --longoptions yes,force,root:,suffix:,help -n 'mclean' -- "$@")
+TEMP=$(getopt -o Yfr:h --longoptions yes,force,root:,suffix:,bw::,help -n 'mclean' -- "$@")
 
 if [ $? != 0 ]
 then
@@ -323,6 +359,7 @@ eval set -- "$TEMP"
 
 
 root="$(pwd)"
+declare -i BW_THRESHOLD=0
 MV="echo mv "
 safe="-n"
 while true
@@ -331,6 +368,10 @@ do
     in
     '-Y' | '--yes')
         DRY=$RUN
+    ;;
+    '--bw')
+        BW_THRESHOLD="${2:-90}"
+        shift 1
     ;;
     '-f' | '--force')
         safe=""
@@ -368,9 +409,15 @@ fi
 
 if [ "$1" == "all" ]
 then
-    actions=( "chmod" "db" "ext" "digit" "kind" "hidden" "trim" )
+    actions=( "chmod" "db" "ext" "unjpe" "digit" "kind" "hidden" "trim" )
 else
     actions=( "$@" )
+fi
+
+# B/W likelihood is a non destructive action
+if [ ${BW_THRESHOLD} -gt 0 ]
+then
+    bw_likelihood "${root}"
 fi
 
 for ((i=0; i<${#actions[@]}; i++))
@@ -384,6 +431,9 @@ do
     ;;
     "ext")
         low_extension "${root}"
+    ;;
+    "unjpe")
+        unjpe "${root}"
     ;;
     "digit")
         single_digit "${root}"
