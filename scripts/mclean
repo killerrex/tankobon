@@ -7,7 +7,7 @@ usage() {
 
 cat <<EOF
 usage:
-    $(basename $0) [-Y] [--root=.] [modes...]
+    $(basename "$0") [-Y] [--root=.] [modes...]
 all = chmod db ext digit kind hidden trim
 
 Options:
@@ -41,7 +41,7 @@ EOF
 DRY=0
 RUN=1
 
-VERBOSE=echo
+VERBOSE='echo'
 
 SUFFIXES=('copy' 'copia')
 
@@ -70,7 +70,7 @@ low_extension() {
     ${VERBOSE} "Change extensions to lowercase"
     for ext in JPG PNG JPE
     do
-        find "$1" -name "*.${ext}" | while read name
+        find "$1" -name "*.${ext}" | while read -r name
         do
             ${MV} "${name}" "${name%.${ext}}.${ext,,}"
         done
@@ -83,9 +83,10 @@ unjpe() {
     local name
 
     ${VERBOSE} "Transform JPE to JPG"
-    find "$1" -name '*.jpe' | while read name
+    find "$1" -name '*.jpe' | while read -r name
     do
-        ${MV} "${name}" "${name%.jpe}.jpg"
+        ${CONVERT} "${name}" "${name%.jpe}.jpg"
+        ${RM} "${name}"
     done
 }
 
@@ -98,15 +99,15 @@ single_digit() {
 
     ${VERBOSE} "Add padding zeros to single digit names"
 
-    find "$1" -iname '[0-9]\.*' | while read name
+    find "$1" -iname '[0-9]\.*' | while read -r name
     do
         ${MV} "${name}" "${name%/*}/0${name##*/}"
     done
 
     ${VERBOSE} "Add padding zeros to single digit double page names"
-    find "$1" -iname '[0-9][^0-9][0-9]\.*' | while read name
+    find "$1" -iname '[0-9][^0-9][0-9]\.*' | while read -r name
     do
-        ${MV} "$name" "$(sed 's:/\([0-9][^0-9]\)\([0-9]\):/0\10\2:' <<<$name)"
+        ${MV} "$name" "$(sed -r 's:/([0-9][^0-9])([0-9]):/0\10\2:' <<<"$name")"
     done
 }
 
@@ -118,39 +119,39 @@ double_digit() {
     local name
 
     ${VERBOSE} "Add padding zeros to double digit names"
-    find "$1" -iname '[0-9][0-9]\.*' | while read name
+    find "$1" -iname '[0-9][0-9]\.*' | while read -r name
     do
         ${MV} "$name" "${name%/*}/0${name##*/}"
     done
 
     ${VERBOSE} "Add padding zeros to double digit double page names"
-    find "$1" -iname '[0-9][0-9][^0-9][0-9][0-9]\.*' | while read name
+    find "$1" -iname '[0-9][0-9][^0-9][0-9][0-9]\.*' | while read -r name
     do
-        ${MV} "$name" "$(sed 's:/\([0-9][0-9][^0-9]\)\([0-9][0-9]\):/0\10\2:' <<<$name)"
+        ${MV} "${name}" "$(sed -r 's:/([0-9][0-9][^0-9])([0-9][0-9]):/0\10\2:' <<<"${name}")"
     done
 }
 
 
 unparentesis() {
-# Search files with the number inside () and remove the parentesis
+# Search files with the number inside () and remove the parenthesis
 # Argument:
 # 1: Path
     local name
 
-    ${VERBOSE} "Remove parentesis from names"
-    find "$1" -iname '*([0-9])*\.*' | while read name
+    ${VERBOSE} "Remove parenthesis from names"
+    find "$1" -iname '*([0-9])*\.*' | while read -r name
     do
-        ${MV} "$name" "$(sed 's/(\([0-9]\))/0\1/' <<<${name})"
+        ${MV} "${name}" "$(sed -r 's/\(([0-9])\)/0\1/' <<<"${name}")"
     done
 
-    find "$1" -iname '*([0-9][0-9])*\.*' | while read name
+    find "$1" -iname '*([0-9][0-9])*\.*' | while read -r name
     do
-        ${MV} "$name" "$(sed 's/(\([0-9][0-9]\))/\1/' <<<${name})"
+        ${MV} "${name}" "$(sed -r 's/\(([0-9][0-9])\)/\1/' <<<"${name}")"
     done
 
-    find "$1" -iname '*([0-9][0-9][0-9])*\.*' | while read name
+    find "$1" -iname '*([0-9][0-9][0-9])*\.*' | while read -r name
     do
-        ${MV} "$name" "$(sed 's/(\([0-9][0-9][0-9]\))/\1/' <<<${name})"
+        ${MV} "${name}" "$(sed -r 's/\(([0-9][0-9][0-9])\)/\1/' <<<"${name}")"
     done
 }
 
@@ -164,13 +165,13 @@ fix_alphabet() {
     local name
     local d
 
-    ${VERBOSE} "Convert files numered with letters"
-    find "$1" -iname '[A-Za-z]\.*' | while read name
+    ${VERBOSE} "Convert files numbered with letters"
+    find "$1" -iname '[A-Za-z]\.*' | while read -r name
     do
         d=$(dirname "${name}")
-        letter=$(basename "$name")
-        number=$(printf '%d' \'$(tr '[[:lower:]]' '[[:upper:]]' <<<${letter::1}))
-        ${MV} "$name" "$d/$(printf %02d $((number-64)))${letter:1:${#letter}}"
+        letter=$(basename "${name}")
+        number=$(printf '%d' "'$(tr '[:lower:]' '[:upper:]' <<<"${letter::1}")")
+        ${MV} "${name}" "$d/$(printf %02d $((number-64)))${letter:1:${#letter}}"
     done
 }
 
@@ -183,7 +184,7 @@ kind_check() {
 
     ${VERBOSE} "Change file extensions according to contents"
 
-    find "$1" -name "*.jpg" -o -name "*.jpeg" -o -name "*.png" | while read name
+    find "$1" -name "*.jpg" -o -name "*.jpeg" -o -name "*.png" | while read -r name
     do
         kind="$(file --mime-type --brief "${name}")"
 
@@ -194,7 +195,7 @@ kind_check() {
         in
             "image/jpeg") good="jpg";;
             "image/png") good="png";;
-            *) echo "Unknow type ${kind} [${name}]"; good="${ext}";;
+            *) echo "Unknown type ${kind} [${name}]"; good="${ext}";;
         esac
 
         if [ "${ext}" != "${good}" ]
@@ -245,12 +246,12 @@ unsuffix() {
     local exp
 
     ${VERBOSE} "Remove clumsy suffixes"
-    for suf in ${SUFFIXES[@]}
+    for suf in "${SUFFIXES[@]}"
     do
         exp='s/\s*'${suf}'\s*//'
-        find "$1" -regex ".*\s*${suf}\s*\..*" | while read name
+        find "$1" -regex ".*\s*${suf}\s*\..*" | while read -r name
         do
-            ${MV} "$name" "$(sed ${exp} <<<${name})"
+            ${MV} "${name}" "$(sed "${exp}" <<<"${name}")"
         done
     done
 }
@@ -262,14 +263,14 @@ dezero() {
 # 1: Path
     local name
     ${VERBOSE} "Remove Extra Zeros from 4-digit names"
-    find "$1" -name '0[0-9][0-9][0-9]\.*' | while read name
+    find "$1" -name '0[0-9][0-9][0-9]\.*' | while read -r name
     do
-        ${MV} "$name" "$(sed 's/0\([0-9][0-9][0-9]\)/\1/' <<<${name})"
+        ${MV} "${name}" "$(sed -r 's/0([0-9][0-9][0-9])/\1/' <<<"${name}")"
     done
     ${VERBOSE} "Remove Extra Zeros from double 4-digit names"
-    find "$1" -name '0[0-9][0-9][0-9]?0[0-9][0-9][0-9]\.*' | while read name
+    find "$1" -name '0[0-9][0-9][0-9]?0[0-9][0-9][0-9]\.*' | while read -r name
     do
-        ${MV} "$name" "$(sed 's/0\([0-9][0-9][0-9].\)0\([0-9][0-9][0-9]\)/\1\2/' <<<${name})"
+        ${MV} "${name}" "$(sed -r 's/0([0-9][0-9][0-9].)0([0-9][0-9][0-9])/\1\2/' <<<"${name}")"
     done
 }
 
@@ -286,26 +287,25 @@ trim_names() {
     local sp
 
     # First the leading whitespaces
-    find "$1" -name "*[[:space:]]" | while read name
+    find "$1" -name "*[[:space:]]" | while read -r name
     do
-        ${MV} "$name" "${name%%+([[:space:]])}"
+        ${MV} "${name}" "${name%%+([[:space:]])}"
     done
 
     # Now the leading and trailing namespaces in the name itself
-    find "$1" -name "[[:space:]]*" -o -name "*[[:space:]].*" | while read name
+    find "$1" -name "[[:space:]]*" -o -name "*[[:space:]].*" | while read -r name
     do
-        folder=$(dirname "$name")
+        folder=$(dirname "${name}")
         ext="${name##*.}"
-        base=$(basename "$name" .$ext)
+        base=$(basename "${name}" ".$ext")
 
         # Remove leading
         sp="${base%%[![:space:]]*}"
         base="${base#${sp}}"
         # And trailing
-        sp="${base##*[![:space:]]}"  # " Needed to solve (https://youtrack.jetbrains.com/issue/IDEA-256714)
+        sp="${base##*[![:space:]]}"
         base="${base%${sp}}"
-
-        ${MV} "$name" "${folder}/${base}.${ext}"
+        ${MV} "${name}" "${folder}/${base}.${ext}"
     done
 }
 
@@ -315,10 +315,10 @@ debracket() {
 # Argument:
 # 1: Path
     local name
-    ${VERBOSE} "Remove Extra Zeros from 4-digit names"
-    find . -iname '*\[*\]*' | while read name
+    ${VERBOSE} "Remove In Bracket comments from names"
+    find . -iname '*\[*\]*' | while read -r name
     do
-        ${MV} "$name" "$(sed 's/\s*\[[^]]*\]\s*//' <<<${name})"
+        ${MV} "${name}" "$(sed -r 's/\s*\[[^]]*\]\s*//' <<<"${name}")"
     done
 }
 
@@ -331,13 +331,13 @@ bw_likelihood() {
 
     ${VERBOSE} "Report color images"
 
-    find "$1" -name "*.jpg" -o -name "*.jpeg" -o -name "*.png" | sort | while read name
+    find "$1" -name "*.jpg" -o -name "*.jpeg" -o -name "*.png" | sort | while read -r name
     do
         p=$(magick convert "${name}" -colorspace HSL -channel g -separate +channel -format '%[fx:100*(1 - mean)]' info:)
         p="${p%.*}"
-        if [ $p -lt ${BW_THRESHOLD} ]
+        if [ "$p" -lt "${BW_THRESHOLD}" ]
         then
-            printf '%03d%%: %s\n' ${p} "${name#${root}/}"
+            printf '%03d%%: %s\n' "${p}" "${name#${root}/}"
         fi
     done
 }
@@ -346,15 +346,13 @@ bw_likelihood() {
 ################################################################################
 #
 
-TEMP=$(getopt -o Yfr:h --longoptions yes,force,root:,suffix:,bw::,help -n 'mclean' -- "$@")
-
-if [ $? != 0 ]
+if ! TEMP=$(getopt -o Yfr:h --longoptions yes,force,root:,suffix:,bw::,help -n 'mclean' -- "$@")
 then
     echo "Terminating..." >&2
     exit 1
 fi
 
-# Note the quotes around `$TEMP': they are essential!
+# Note the quotes around '$TEMP': they are essential!
 eval set -- "$TEMP"
 
 
@@ -400,11 +398,15 @@ do
     shift
 done
 
-if [ ${DRY} -eq $RUN ]
+if [ "${DRY}" -eq "$RUN" ]
 then
     MV="mv -v ${safe} "
+    CONVERT="magick convert "
+    RM="rm -v "
 else
     MV="echo mv "
+    CONVERT="echo convert "
+    RM="echo rm "
 fi
 
 if [ "$1" == "all" ]
@@ -415,14 +417,15 @@ else
 fi
 
 # B/W likelihood is a non destructive action
-if [ ${BW_THRESHOLD} -gt 0 ]
+if [ "${BW_THRESHOLD}" -gt 0 ]
 then
     bw_likelihood "${root}"
 fi
 
 for ((i=0; i<${#actions[@]}; i++))
 do
-    case "${actions[$i]}" in
+    cmd=${actions[$i]}
+    case "${cmd}" in
     "chmod")
         fix_chmod "${root}"
     ;;

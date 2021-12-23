@@ -21,6 +21,7 @@ fi
 OK='\e[32m'
 KO='\e[31m'
 WR='\e[33m'
+EM='\e[34m'
 DF='\e[0m'
 
 #
@@ -131,12 +132,15 @@ verify_folder() {
         fi
     done
 
+    INI="$low"
+    FIN=$((n-1))
     if [ ${failed} -eq 0 ]
     then
-        echo -e "${OK}All seems ok [$low --> $((n-1))]"
+        echo -e "${OK}All seems ok [${INI} --> ${FIN}]"
         STATE='OK'
     else
         STATE='KO'
+
     fi
     echo -e "${DF}"
 }
@@ -144,7 +148,7 @@ verify_folder() {
 
 #
 # The main loop
-declare -A summary
+declare -A summary initial final
 for f in "$@"
 do
     if [ ! -d "$f" ]
@@ -157,6 +161,8 @@ do
     wrong_naming "$f"
     verify_folder "$f"
     summary[$f]=${STATE}
+    initial[$f]=${INI}
+    final[$f]=${FIN}
 done
 
 if [ ${#summary[@]} -gt 1 ]
@@ -170,6 +176,6 @@ then
         'KO') c="${KO}KO${DF}";;
         *) continue;;
         esac
-        echo -e "  $c $f"
+        echo -e "  $c $f   [${EM}${initial[$f]}${DF} --> ${EM}${final[$f]}${DF}]"
     done
 fi

@@ -13,8 +13,8 @@ set -e
 NAME="$(basename "$0")"
 
 
-SHORT='Yhe:rs:S:d:j:J:t:T:nawi:f:'
-LONG='yes,help,ext:,reset,src:,second:,double:,join:,t_join:,tgt:,t_double:,no_double,auto,wrong,ini:,fin:'
+SHORT='Nhe:zrs:S:d:j:J:t:T:nawi:f:g'
+LONG='dry,help,ext:,empty,reversed,src:,second:,double:,join:,t_join:,tgt:,t_double:,no_double,auto,wrong,ini:,fin:,gap'
 
 usage() {
 cat <<-EOF
@@ -38,16 +38,19 @@ Options:
     -f | --fin N
         Final page (default a == auto)
 
-    -Y | --yes
-        Perform the changes, not just report them
+    -n | --dry
+        Report the changes, but do nothing.
 
     -e | --ext EXT
         Add the extension to the list of default extensions
 
-    -r | --reset
+    -z | --empty
         Clean the list of extensions
 
-    -n | --no_double
+    -r | --reversed
+        Double pages follow the right-to-left order ([N+1]-[N].ext)
+
+    -N | --no_double
         Do Not Consider double pages.
 
     -s | --src PATTERN
@@ -66,7 +69,7 @@ Options:
         Set the target file pattern (see printf) Default is "${TGT}"
 
     -J | --t_join str
-        Join the target double page with this tring instead of the default (-)
+        Join the target double page with this string instead of the default (-)
 
     -T | --t_double PATTERN
         Set the target file pattern (see printf) for double pages
@@ -76,6 +79,9 @@ Options:
     
     -w | --wrong
         Do not apply the logic to increase the detected wrong double pages
+
+    -g | --gap
+        Double pages may be wrongly numbered, but preserving the numeric gap (so n is double page, but next is n+2)
 
 EOF
 }
@@ -101,9 +107,9 @@ orientation() {
 # $1 ==> Image
     local -a size
 
-    size=( $(magick identify -format '%w %h' "$1") )
+    read -r -a size < <(magick identify -format '%w %h' "$1")
 
-    if [ ${size[0]} -gt ${size[1]} ]
+    if [ "${size[0]}" -gt "${size[1]}" ]
     then
         echo "landscape"
     else
@@ -147,16 +153,16 @@ single_candidates() {
 
     local candidates=()
     local ext
-    local delta
+    local matches
     for ext in "${EXT[@]}"
     do
-        delta=("${prefix}"*"${suffix}.${ext}")
+        matches=("${prefix}"*"${suffix}.${ext}")
         # If no match [0] contains the glob
-        if [ ! -f "${delta[0]}" ]
+        if [ ! -f "${matches[0]}" ]
         then
             continue
         fi
-        candidates+=("${delta[@]%.${ext}}")
+        candidates+=("${matches[@]%.${ext}}")
     done
 
     if [ ${#candidates[@]} -eq 0 ]
@@ -208,7 +214,7 @@ double_candidates() {
     local suffix="${parts[6]//%%/%}"
 
     # If any of the patterns is variable and there is no gap, it is an error
-    if [ -z "${middle}" ] && ( [ -z "$w1" ] || [ -z "$w2" ] )
+    if [ -z "${middle}" ] && { [ -z "$w1" ] || [ -z "$w2" ]; }
     then
         echo "Error: Invalid Double pattern (${DBL_SRC}) Get sure it has two %d elements"
         exit 20
@@ -256,16 +262,16 @@ double_candidates() {
     fi
 
     local candidates=()
-    local ext delta
+    local ext matches
     for ext in "${EXT[@]}"
     do
-        delta=("${prefix}"*"${middle}"*"${suffix}.${ext}")
+        matches=("${prefix}"*"${middle}"*"${suffix}.${ext}")
         # If no match [0] contains the glob
-        if [ ! -f "${delta[0]}" ]
+        if [ ! -f "${matches[0]}" ]
         then
             continue
         fi
-        candidates+=("${delta[@]%.${ext}}")
+        candidates+=("${matches[@]%.${ext}}")
     done
 
     if [ ${#candidates[@]} -eq 0 ]
@@ -293,8 +299,14 @@ double_candidates() {
     do
         if [[ "$m" =~ ^${pattern}$ ]]
         then
-            v="${m% *}"
-            w="${m#* }"
+            if [ "${REVERSED}" == 'yes' ]
+            then
+                w="${m% *}"
+                v="${m#* }"
+            else
+                v="${m% *}"
+                w="${m#* }"
+            fi
         else
             continue
         fi
@@ -303,6 +315,8 @@ double_candidates() {
         w=$((10#${w// }))
         if ((w != v + 1))
         then
+            # DBL_SRC contains the string format
+            # shellcheck disable=SC2059
             echo "Invalid double page: $m => $(printf "${DBL_SRC}" $v $w)"
             exit 200
         fi
@@ -317,8 +331,7 @@ double_candidates() {
 ###
 ###############################################################################
 
-TEMP=$(getopt -o "${SHORT}0123456789" --longoptions "${LONG}" -n "${NAME}" -- "$@")
-if [ $? != 0 ]
+if ! TEMP=$(getopt -o "${SHORT}0123456789" --longoptions "${LONG}" -n "${NAME}" -- "$@")
 then
     echo "Terminating..." >&2
     exit 1
@@ -328,7 +341,9 @@ fi
 eval set -- "$TEMP"
 
 
-DRY=echo
+RUN=
+REVERSED='no'
+GAP='no'
 EXT=( 'jpg' 'png' )
 SRC='%03d'
 NXT=
@@ -358,15 +373,21 @@ do
         fin=$((10#$2))
         shift
     ;;
-    '-Y' | '--yes')
-        DRY=$RUN
+    '-n' | '--dry')
+        RUN='echo'
     ;;
     '-e' | '--ext')
         EXT+=("$2")
         shift
     ;;
-    '-r' | '--reset')
+    '-z' | '--empty')
         EXT=()
+    ;;
+    '-r' | '--reversed')
+        REVERSED='yes'
+    ;;
+    '-g' | '--gap')
+        GAP='yes'
     ;;
     '-s' | '--src')
         SRC="$2"
@@ -396,7 +417,7 @@ do
         DBL_TGT="$2"
         shift
     ;;
-    '-n' | '--no_double')
+    '-N' | '--no_double')
         DOUBLE='no'
     ;;
     '-a' | '--auto')
@@ -444,7 +465,7 @@ case "$#" in
     inc="$1"
 ;;
 *)
-    echo "Too many arguments: $@"
+    echo "Too many arguments: $*"
     exit 20
 ;;
 esac
@@ -528,7 +549,7 @@ then
     val="$((10#${BASH_REMATCH[2]}))"
     # Inc is really the value that ini shall have so
     #  ini_out = ini + inc_real = inc ==> inc_real = inc - ini
-    inc=$((${val} - ${ref}))
+    inc=$((val - ref))
     echo "Auto Increment set to ${inc} so ${ref} ==> $((ref + inc))"
 elif [[ "${inc}" =~ ^([+-])?([0-9]+)$ ]]
 then
@@ -572,14 +593,17 @@ do
     for ext in "${EXT[@]}"
     do
         # Try first with a single page
-        printf -v origin "${SRC}.${ext}" $k
+        # SRC and TGT contains the proper format
+        # shellcheck disable=SC2059
+        printf -v origin "${SRC}.${ext}" "$k"
+        # shellcheck disable=SC2059
         printf -v target "${TGT}.${ext}" $t
         if [ -f "${origin}" ]
         then
             ori="$(orientation "${origin}")"
             if [ "${origin}" != "${target}" ]
             then
-                ${DRY} mv -i "${origin}" "${target}"
+                ${RUN} mv -i "${origin}" "${target}"
             fi
             if [ "${ori}" == "landscape" ]
             then
@@ -595,14 +619,26 @@ do
         [ "${DOUBLE}" != 'yes' ] && continue
 
         # Look also for double pages
-        printf -v origin "${DBL_SRC}.${ext}" $k $((k+1))
+        if [ "${REVERSED}" == 'yes' ]
+        then
+            # Using right to left numbering, so a double page is 010-009.png and not 009-010.png
+            # DBL_SRC contains the proper format
+            # shellcheck disable=SC2059
+            printf -v origin "${DBL_SRC}.${ext}" $((k+1)) "$k"
+        else
+            # DBL_SRC contains the proper format
+            # shellcheck disable=SC2059
+            printf -v origin "${DBL_SRC}.${ext}" "$k" $((k+1))
+        fi
+        # DBL_TGT contains the proper format
+        # shellcheck disable=SC2059
         printf -v target "${DBL_TGT}.${ext}" $t $((t+1))
         if [ -f "${origin}" ]
         then
             ori="$(orientation "${origin}")"
             if [ "${origin}" != "${target}" ]
             then
-                ${DRY} mv -i "${origin}" "${target}"
+                ${RUN} mv -i "${origin}" "${target}"
             fi
             if [ "${ori}" == "portrait" ]
             then
@@ -617,9 +653,12 @@ do
     done
 done
 
+# Check if the last page was single or double page to report properly the range
 knd='s'
 for ext in "${EXT[@]}"
 do
+    # DBL_TGT contains the proper format
+    # shellcheck disable=SC2059
     printf -v target "${DBL_TGT}.${ext}" ${tf} $((tf+1))
     if [ "${exist["${target}"]}" == 'y' ]
     then
@@ -627,7 +666,7 @@ do
     fi
 done
 
-
+# Report the output range (before correcting double-page)
 if [ ${knd} == 's' ]
 then
     echo "Transformed output $t0 --> $tf"
@@ -644,38 +683,55 @@ else
 fi
 
 # Create the offset map
-declare -A offset
-
-d=0
+declare -iA offset
+declare -i d=0 n_wrong=0
 for ((t=t0; t<=tf; t++))
 do
     offset[$t]=$d
-    [ "${wrong[$t]}" == 'y' ] && ((d+=1))
+    if [ "${wrong[$t]}" == 'y' ]
+    then
+        n_wrong+=1
+        if [ "${GAP}" == 'no' ]
+        then
+            d+=1
+        fi
+    fi
 done
 
-if [ $d == 0 ]
+if [ ${n_wrong} == 0 ]
 then
     echo "No wrong double pages found"
     exit 0
+else
+    echo "Found ${n_wrong} double pages with single page number"
 fi
 
+# Renumber the paged from the end to add the number space for the double pages with wrong numeration.
+declare -i t k
 for ((t=tf; t>=t0; t--))
 do
-    k=$((t + offset[$t]))
+    # Get the proper number for this page
+    k=t+offset[$t]
     if [ "${wrong[$t]}" == 'y' ]
     then
+        # This is a double page but with a single digit name. Change it to NNN-MMM
         for ext in "${EXT[@]}"
         do
             printf -v f "${TGT}.${ext}" $t
             printf -v g "${DBL_TGT}.${ext}" $k $((k+1))
             if [ "${exist[$f]}" == 'y' ]
             then
-                ${DRY} mv -i "$f" "$g"
+                ${RUN} mv -i "$f" "$g"
             fi
         done
     elif [ "$k" == "$t" ]
     then
-        [ -z "${DRY}" ] && continue
+        # This is a single page with the proper numeration.
+        # In normal mode, just do nothing, in dry run mode report that is correct.
+        if [ -z "${RUN}" ]
+        then
+            continue
+        fi
         for ext in "${EXT[@]}"
         do
             printf -v f "${TGT}.${ext}" $t
@@ -685,31 +741,44 @@ do
         done
         continue
     else
+        # This is a single or double page but with the wrong numbers.
+        # Rename it to make space for the previous pages.
         for ext in "${EXT[@]}"
         do
             printf -v f "${TGT}.${ext}" $t
-            printf -v g "${TGT}.${ext}" $k
             if [ "${exist[$f]}" == 'y' ]
             then
-                ${DRY} mv -i "$f" "$g"
+                printf -v g "${TGT}.${ext}" $k
+                ${RUN} mv -i "$f" "$g"
             fi
 
             printf -v f "${DBL_TGT}.${ext}" $t $((t+1))
-            printf -v g "${DBL_TGT}.${ext}" $k $((k+1))
             if [ "${exist[$f]}" == 'y' ]
             then
-                ${DRY} mv -i "$f" "$g"
+                printf -v g "${DBL_TGT}.${ext}" $k $((k+1))
+                ${RUN} mv -i "$f" "$g"
             fi
         done
     fi
 done
 
+# Report the final real range: Check if the last one is single or double
 echo ""
 
-printf -v f "${DBL_TGT}.${ext}" ${tf} $((tf+1))
-if [ "${exist[$f]}" == 'y' ]
+knd='s'
+for ext in "${EXT[@]}"
+do
+    printf -v f "${DBL_TGT}.${ext}" ${tf} $((tf+1))
+    if [ "${exist[$f]}" == 'y' ]
+    then
+        knd='d'
+    fi
+done
+
+# Report the output range (before correcting double-page)
+if [ ${knd} == 's' ]
 then
-    echo "Final output range: $t0 --> $((tf+d))-$((tf+d+1))"
+    echo "Final output range: ${t0}--> $((tf+d))"
 else
-    echo "Final output range: $t0 --> $((tf+d))"
+    echo "Final output range: ${t0} --> $((tf+d))-$((tf+d+1))"
 fi
