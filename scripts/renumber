@@ -57,7 +57,7 @@ Options:
         Set the source file pattern (see printf) Default is "${SRC}"
 
     -j | --join str
-        Join the source double page with this tring instead of the default (-)
+        Join the source double page with this string instead of the default (-)
 
     -S | --second PATTERN
         Set the pattern for the 2nd group of numbers in double pages. Default equal to single pattern.

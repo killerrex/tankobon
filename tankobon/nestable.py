@@ -14,7 +14,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License
-along with this program.  If not, see <http://www.gnu.org/licenses/>.
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
 Structure to represent
@@ -25,6 +25,7 @@ Structure to represent
 
 from __future__ import annotations
 
+from typing import Optional
 from pathlib import Path
 import logging
 import re
@@ -46,7 +47,7 @@ class Error(Exception):
 
 class CannotChooseError(Error):
     """
-    Raised when algorithm cannot choose an unique number
+    Raised when algorithm cannot choose a single number from all the candidates
 
     Args:
         name: Original file/folder name
@@ -68,7 +69,7 @@ class Base:
         _number: Associated number in the collection.
         _hoaxes: List of numbers present in this level name not related
                  with the real number
-        _glob: Pattern to select folders for the sub-levels
+        _glob: Pattern to select folders for the sub-elements
     """
 
     def __init__(self, name: str, pattern='*'):
@@ -80,9 +81,17 @@ class Base:
         """
         super().__init__()
         self._name = name
-        self._number = None
+        self._number: Optional[UNumber] = None
         self._hoaxes = []
         self._glob = pattern
+
+    def normalize(self):
+        """
+        Assure the number does not end in .0 even if the original was X.0
+        """
+        if self._number is None:
+            return
+        self._number.normalize()
 
     def path(self) -> Path:
         """
@@ -113,7 +122,7 @@ class Base:
         List of numbers that all this element children will inherit.
 
         Any number present in a children's name just as repetition
-        of the parent's numbers is consider spurious.
+        of the parent's numbers is considered spurious.
 
         Returns:
             hoaxes, level-related
@@ -198,7 +207,7 @@ class Node(Base):
 
     def __init__(self, parent: Base, name, expected, opt: OptGroup):
         """
-        Extract the number number from the name.
+        Extract the number from the name.
 
         Args:
             parent: Base object where this element is nested
@@ -343,17 +352,19 @@ class Node(Base):
 
         # Remove any spurious value
         numbers = self._rm_spurious(numbers)
-        # Finally decide from the expected values
+        # Decide from the expected values
         number, hoax = self._guess(expected, numbers)
         self._hoaxes.extend(hoax)
 
         if number is None:
-            # This is an bonus number, use the 'bonus' label
+            # This is a bonus number, use the 'bonus' label
             _logger.debug("  Bonus {}".format(type(self).__name__))
             self._extra = self._option.bonus
             return
 
         self._number = number
+        if self._option.normalize:
+            self.normalize()
 
         # The intermediate chapters are never expected...
         if not self._number.is_normal():
@@ -362,7 +373,7 @@ class Node(Base):
         try:
             expected.remove(n)
         except ValueError:
-            # Ok, this shall be an special one
+            # Ok, this shall be a special one
             _logger.info("%s: Special as %s not in %s", self.path(), n, str(expected))
             self._extra = self._option.special
 
@@ -370,7 +381,7 @@ class Node(Base):
         """
         Check equality.
 
-        2 nodes are equal if have the same number and special flag.
+        2 nodes are equal when they have the same number and special flag.
 
         Args:
             other: The other NestedNode
@@ -566,6 +577,21 @@ class Node(Base):
         """
         return Transform(self._name, format(self))
 
+    def force(self, whole=None, decimal=...):
+        """
+        Change the internal numbering to the given values
+
+        Args:
+            whole: Change the whole number.
+            decimal: Change the decimal Use None for no decimal
+        """
+        if self._number is None:
+            self._number = UNumber('0')
+        if whole is not None:
+            self._number.whole = whole
+        if decimal is not Ellipsis:
+            self._number.decimal = decimal
+
 
 class Chapter(Node):
     """
@@ -665,7 +691,7 @@ class Volume(Node):
 
     def __iter__(self):
         """
-        Allow to iterate through the sub-chapters
+        Iterate through the elements
 
         Returns:
             Iterator in the list of child nodes
@@ -678,6 +704,27 @@ class Volume(Node):
         """
         nest = [node.transform() for node in self._nodes]
         return Transform(self._name, format(self), nest)
+
+    def renumber(self, n0):
+        """
+        Convert to a continuous numeration
+
+        Args:
+            n0: Value of the last chapter. Set it to 0 to reset the count
+
+        Returns:
+            Chapter number of the last chapter in this volume
+        """
+        n = n0
+        for chapter in self._nodes:
+            if chapter.skip():
+                continue
+            # Do not increment the counter in special chapters, so they get the
+            # same relative position
+            if chapter.is_normal():
+                n += 1
+            chapter.force(whole=n)
+        return n
 
 
 class Series(Base):
@@ -700,14 +747,17 @@ class Series(Base):
         self.origin = opts.root.parent
         self._virtual = opts.single
 
-        self._nodes = []
+        self._nodes: list[Volume] = []
         self._wides = [0, 0, 0]
         # Search for a number in the old title...
         self._hoaxes = UNumber.extract_numbers(self._name, False)
         # Add any user defined hoax
         self._hoaxes.extend(opts.hoax)
-        # Finally launch the recursive process
+        # Launch the recursive process
         self._populate(opts)
+        # change the numeration if needed
+        if opts.renumber != 'asis':
+            self.renumber(opts.renumber == 'flat')
 
     def path(self) -> Path:
         if self._virtual:
@@ -777,10 +827,15 @@ class Series(Base):
         # As a single book, no bonus or extra for volume level
         opts.volume.bonus = None
         opts.volume.special = None
-        vol = Volume(self, self._name, None, opts.volume)
+        nodes = self._listdir()
+        if len(nodes) != 1:
+            # Assume we are already inside the volume
+            vol = Volume(self, opts.root.resolve().name, None, opts.volume)
+        else:
+            vol = Volume(self, nodes[0], None, opts.volume)
         self._nodes = [vol]
 
-        # Do not search for chapters in flat mode... this si a little bit silly in single mode
+        # Do not search for chapters in flat mode... this is a bit silly in single mode
         if opts.volume.flat:
             return
 
@@ -825,3 +880,11 @@ class Series(Base):
              Always true, the top node is always skip.
         """
         return True
+
+    def renumber(self, flat):
+        n = 0
+        for vol in self._nodes:
+            # Restart all the volumes at chapter 1
+            m = vol.renumber(n)
+            if not flat:
+                n = m

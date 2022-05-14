@@ -16,7 +16,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License
-along with this program.  If not, see <http://www.gnu.org/licenses/>.
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
 Universal representation of a number.
@@ -70,6 +70,10 @@ class UNumber:
             The decimal number
 
         Examples:
+            >>> UNumber.from_roman('IIII')
+            4
+            >>> UNumber.from_roman('VIIII')
+            9
             >>> UNumber.from_roman('XIX')
             19
             >>> UNumber.from_roman('MMMMCMXCIX')
@@ -93,7 +97,7 @@ class UNumber:
                 highest = v
                 continue
 
-            # This is subtractive value, only I, X, C and it must be
+            # This is subtractive value, only I, X, C, and it must be
             # 5 or 10 times smaller, so the valid sets are:
             # I only with V, X; X only with L, C; C only with D, M
             if v not in (1, 10, 100) or highest // v > 10:
@@ -181,6 +185,31 @@ class UNumber:
             self._value = self.from_roman(txt)
             self._dec = None
 
+    @property
+    def whole(self):
+        """
+        Access to the internal whole number
+        """
+        return self._value
+
+    @whole.setter
+    def whole(self, value):
+        self._value = int(value)
+
+    @property
+    def decimal(self):
+        """
+        Decimal field, use None to use whole numbers
+        """
+        return self._dec
+
+    @decimal.setter
+    def decimal(self, decimal):
+        if decimal is None:
+            self._dec = None
+        else:
+            self._dec = int(decimal)
+
     def __str__(self):
         """
         String representation. Add a decimal part only if is not None (0 will output n.0)
@@ -209,7 +238,7 @@ class UNumber:
             the formatted string
         """
         if format_spec == 'r':
-            # no decimals for roman numbers
+            # no decimals for roman number
             return self.to_roman(self._value)
 
         if format_spec.endswith('f'):
@@ -306,6 +335,13 @@ class UNumber:
         Check if this is a special number.
 
         Returns:
-            True if this is a normal number, not an special.
+            True if this is a normal number, not special.
         """
         return self._dec is None
+
+    def normalize(self):
+        """
+        If the decimal part is 0, set it to None
+        """
+        if self._dec == 0:
+            self._dec = None

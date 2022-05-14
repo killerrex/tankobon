@@ -14,7 +14,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License
-along with this program.  If not, see <http://www.gnu.org/licenses/>.
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
 Parse the user options and return a nice object
@@ -36,14 +36,14 @@ from .transform import WorkMode
 
 class ActionFlag(argparse.Action):
     """
-    Option that allows enable and disable it.
-    This allows to use the default value as stored configuration
-    but it can be override from command line
+    Option that allows to enable and disable it.
+    This allows to use the default value as stored configuration and
+    to override it from command line
 
-    If no default value is given, it works as an store_true action
+    If no default value is given, it works as a store_true action
 
     Developed from:
-    http://stackoverflow.com/a/20422915
+    https://stackoverflow.com/a/20422915
     """
 
     _Negate = '--no-'
@@ -61,7 +61,7 @@ class ActionFlag(argparse.Action):
         If no default value is given and the option starts with
         --no-
         it works as a store_false, for any other option is a store_true.
-        Any short option is consider as a store_true and the negation
+        Any short option is considered as a store_true and the negation
         is added: -b ==> --no-b
 
         Args:
@@ -197,6 +197,7 @@ class OptGroup(OptDict):
         wide: Number of digits to use
         special: suffix to add to the special volumes/chapters (Out of numeration)
         bonus: suffix to add to the bonus chapters
+        normalize: Remove unnecessary fractional parts from the numbers
     """
 
     def __init__(self, name: str, prefix: str = None, **kwargs):
@@ -206,7 +207,7 @@ class OptGroup(OptDict):
         Args:
             name: Full name for the help strings
             prefix: Identifier of the level (equal to name if omitted)
-            **kwargs: Any other attribute to set it's initial value
+            **kwargs: Any other attribute to set its initial value
         """
         super().__init__()
 
@@ -226,7 +227,7 @@ class OptGroup(OptDict):
         # Default template:
         # If the element has no parent:
         # 'Series name Vol 01'
-        # If has a parent
+        # If it has a parent:
         #  'Series name Vol 01 Cap 01'
         self.template = '%l%_%t%u %p%n%s'
         self.upper = None
@@ -234,6 +235,7 @@ class OptGroup(OptDict):
         self.force = False
         self.special = ' Special'
         self.bonus = 'Bonus'
+        self.normalize = False
 
         # Inherit any user given value
         self.__dict__.update(kwargs)
@@ -255,7 +257,8 @@ class OptGroup(OptDict):
             'wide': self.wide,
             'force': self.force,
             'special': self.special,
-            'bonus': self.bonus
+            'bonus': self.bonus,
+            'normalize': self.normalize
         }
 
     def load(self, config):
@@ -278,6 +281,7 @@ class OptGroup(OptDict):
         self.force = sub.getfloat('force', vars=self)
         self.special = sub.get('special', vars=self)
         self.bonus = sub.get('bonus', vars=self)
+        self.normalize = sub.getboolean('normalize', vars=self)
 
     def add_group(self, is_bottom: bool, parser: argparse.ArgumentParser, tag=None):
         """
@@ -288,7 +292,6 @@ class OptGroup(OptDict):
             parser: The ArgumentParser
             tag: The initial label (use prefix if omitted)
         """
-
         if tag is None:
             tag = self.prefix.strip().lower()
 
@@ -299,6 +302,12 @@ class OptGroup(OptDict):
             title=f'{name} Options',
             description=f'Options to control the input and output of {name} level'
         )
+
+        g = group.add_argument(
+            f'--{tag}-normalize', action=ActionFlag, default=self.normalize,
+            help=f'Remove unnecessary fractional parts in {name} numbers'
+        )
+        self._map[g.dest] = 'normalize'
 
         # Search for roman numerals in the input?
         g = group.add_argument(
@@ -478,6 +487,7 @@ class Options(OptDict):
         self.single = False
         self.log = 'info'
         self.hoax = []
+        self.renumber = 'asis'
 
         self.volume = OptGroup('Volume', 'vol ')
         self.volume.add_group(False, parser)
@@ -544,6 +554,7 @@ class Options(OptDict):
         self.action = WorkMode(sub.get('action', vars=self))
         self.log = sub.get('log', vars=self)
         self.hoax = [int(s) for s in sub.get('hoax', vars=self).split()]
+        self.renumber = sub.get('renumber', 'asis')
 
     def store(self, config):
         """
@@ -557,7 +568,8 @@ class Options(OptDict):
             'single': self.single,
             'action': self.action.value,
             'log': self.log,
-            'hoax': ' '.join(str(n) for n in self.hoax)
+            'hoax': ' '.join(str(n) for n in self.hoax),
+            'renumber': self.renumber,
         }
         self.volume.store(config)
         self.chapter.store(config)
@@ -635,6 +647,12 @@ class Options(OptDict):
             help='Numbers to ignore from all the levels'
         )
         self._map[g.dest] = 'hoax'
+
+        g = parser.add_argument(
+            '--renumber', choices=['asis', 'flat', 'continuous'],
+            default='asis', help='Change the chapter numeration schema'
+        )
+        self._map[g.dest] = 'renumber'
 
     def _classify(self, args):
         """

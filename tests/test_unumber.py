@@ -14,7 +14,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License
-along with this program.  If not, see <http://www.gnu.org/licenses/>.
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
 from tankobon import UNumber
@@ -49,6 +49,14 @@ def test_to_roman(probes):
     """
     for v in probes:
         assert UNumber.to_roman(v) == probes[v]
+
+
+def test_roman_special():
+    """
+    Special cases of roman numbers like IIII for 4.
+    """
+    assert UNumber.from_roman('IIII') == 4
+    assert UNumber.from_roman('VIIII') == 9
 
 
 def test_exhaustive():
@@ -90,3 +98,23 @@ def test_is_normal():
     """
     assert UNumber(14).is_normal()
     assert not UNumber(14.5).is_normal()
+
+
+def test_accessors():
+    """
+    Check the modification of the number content
+    """
+    un = UNumber('3.14')
+
+    assert un.whole == 3
+    assert un.decimal == 14
+
+    # Try to change the values
+    un.whole = 5
+    assert int(un) == 5
+    assert float(un) == pytest.approx(5.14)
+    un.decimal = 33
+    assert float(un) == pytest.approx(5.33)
+    assert not un.is_normal()
+    un.decimal = None
+    assert un.is_normal()

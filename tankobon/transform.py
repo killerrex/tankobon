@@ -14,7 +14,7 @@ MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License
-along with this program.  If not, see <http://www.gnu.org/licenses/>.
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 
 Transform objects store the mapping between the old and new names,
@@ -118,7 +118,7 @@ class Transform:
             tabs: String to add to each line as tabs for alignment
             as_log: Use the log as output
         """
-        # Obtain the info as a 2 columns
+        # Obtain the info as 2 columns
         old, new = self._two_cols(tabs)
 
         c = max(len(s) for s in old)
