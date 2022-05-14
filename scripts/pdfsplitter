@@ -61,20 +61,20 @@ declare -A table
 declare -a order
 
 dup_names=0
-while read line
+while read -r line
 do
     page=${line%=*}
     name=${line#*=}
-    order+=(${page})
+    order+=("${page}")
     table[${page}]="${name}"
 
-    # If we know already that they are duplicate dnames, do not search for it again
+    # If we know already that they are duplicated names, do not search for it again
     if [ ${dup_names} != 0 ]
     then
         continue
     fi
 
-    for pg in ${!table[@]}
+    for pg in "${!table[@]}"
     do
         if [ "${pg}" == "${page}" ]
         then
@@ -111,15 +111,16 @@ last='0'
 cd "${out}"
 for page in "${order[@]}"
 do
-    pg=$(printf %03d ${page})
-    img=(img-${pg}-*)
+    pg=$(printf %03d "${page}")
+    img=("img-${pg}-"*)
     if [ ${#img[@]} -ne 1 ] || [ ! -f "${img[0]}" ]
     then
         echo "Unexpected format, expand manually"
         exit 1
     fi
+    ori="${img[0]}"
     # Ignore the name extension if any and use the generated one
-    ext="${img[0]#*.}"
+    ext="${ori#*.}"
     tgt="${table[$page]}"
     # Detect only png, jpg that are the most common
     tgt="${tgt%.jpg}"
@@ -137,13 +138,13 @@ do
         fi
         echo "LAST=${last} CH: ${ch} TGT: ${tgt}"
         last="${tgt}"
-        d="c$(printf '%03d' ${ch})"
+        d="c$(printf '%03d' "${ch}")"
         mkdir -p "$d"
         tgt="$d/${tgt}.${ext}"
     ;;
     *) echo "Internal error"; exit 10;;
     esac
 
-    mv -i "${img}" "${tgt}"
+    mv -i "${ori}" "${tgt}"
 done
 

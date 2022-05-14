@@ -23,7 +23,7 @@ Work Modes:
   digit:     Search files with a single digit name and add a 0 before
   double:    Search files with a double digit name and add a 0 before
   kind:      Check that the jpg and png files are what they say...
-  unpar:     Search files with the number inside () and remove the parentesis
+  unpar:     Search files with the number inside () and remove the parenthesis
   unalpha:   Correct that weird alphabet-ordered directories... use with care!
   hidden:    List any hidden file and delete it...
   unsuffix:  Remove redundant suffixes like "copy" or "copia"
@@ -132,7 +132,7 @@ double_digit() {
 }
 
 
-unparentesis() {
+unparenthesis() {
 # Search files with the number inside () and remove the parenthesis
 # Argument:
 # 1: Path
@@ -445,7 +445,7 @@ do
         double_digit "${root}"
     ;;
     "unpar")
-        unparentesis "${root}"
+        unparenthesis "${root}"
     ;;
     "unalpha")
         fix_alphabet "${root}"
